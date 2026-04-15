@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "NEXO App"
+version = "1.0.0"
+id = "artifacts/nexo-app"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 20105
+
+[services.development]
+run = "pnpm --filter @workspace/nexo-app run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/nexo-app", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/nexo-app", "run", "serve" ]
+
+[services.env]
+PORT = "20105"
+BASE_PATH = "/"
