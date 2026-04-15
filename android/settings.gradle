@@ -1,0 +1,11 @@
+include ':app'
+include ':capacitor-android'
+project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/android/capacitor')
+
+apply from: '../node_modules/@capacitor/android/capacitor.settings.gradle'
+
+include ':nexo-ble'
+project(':nexo-ble').projectDir = new File(rootProject.projectDir, '../plugins/nexo-ble/android')
+
+include ':nexo-auth'
+project(':nexo-auth').projectDir = new File(rootProject.projectDir, '../plugins/nexo-auth/android')
