@@ -1,48 +1,30 @@
 # Ultra Yo
 
-Asistente personal de voz tipo Jarvis para Android, con Claude como cerebro.
+Tu propia IA, tipo Jarvis, que vive **dentro de tu teléfono Android**. No se conecta a ningún servicio: el modelo (Gemma 4 E2B, abierto, de Google) se ejecuta en el propio teléfono con [LiteRT-LM](https://developers.google.com/edge/litert-lm/overview). Es gratis, privado y funciona sin internet.
 
-- `android/`: la app del teléfono (Kotlin + Jetpack Compose). Pulsas, hablas y te responde en voz alta.
-- `backend/`: el servidor (Python + FastAPI). Recibe la conversación, se la pasa a Claude y devuelve la respuesta. La clave de la API de Claude vive solo aquí, nunca en el teléfono.
+## Cómo se usa
 
-## Fase 1: puesta en marcha
+1. **Instala la app.** Cada cambio se compila solo en GitHub Actions (pestaña **Actions**, ejecución más reciente, artefacto `ultra-yo-apk`). Descárgalo en el teléfono, descomprímelo e instala el APK; Android pedirá permiso para instalar apps de origen desconocido.
+2. **Descarga su cerebro.** La primera vez la app descarga el modelo (unos 2,6 GB, mejor con wifi). Solo se hace una vez.
+3. **Háblale.** Toca **Hablar** y pregúntale lo que quieras. Te responde en voz alta.
 
-### 1. Servidor
+### Enséñale
 
-Necesita dos variables de entorno:
+Tu IA aprende lo que le digas y lo guarda en el teléfono:
 
-| Variable | Qué es |
-|---|---|
-| `ANTHROPIC_API_KEY` | Tu clave de la API de Claude (console.anthropic.com). |
-| `JARVIS_TOKEN` | Una contraseña larga que inventes tú. La app la usa para que nadie más pueda usar tu servidor. |
+- "Recuerda que mi proyecto se llama NEXO" → lo apunta y lo tendrá siempre en cuenta.
+- "Olvida lo de NEXO" → borra ese recuerdo. "Olvida todo" → borra todos.
+- "¿Qué sabes de mí?" → te dice lo que le has enseñado.
 
-Opcionales: `CLAUDE_MODEL` (por defecto `claude-opus-5-5`) y `CLAUDE_EFFORT` (por defecto `low`, para que responda rápido por voz).
+En **Memoria** puedes ver, añadir y borrar lo que sabe, y cambiar su **personalidad**: su nombre, cómo habla y qué hace.
 
-Para desplegarlo en Railway: crea un proyecto desde este repositorio, pon `backend` como directorio raíz (usa el `Dockerfile`), añade las dos variables y genera un dominio público. Comprueba que `https://TU-DOMINIO/health` responde `{"ok": true}`.
-
-En local:
-
-```bash
-cd backend
-pip install -r requirements-dev.txt
-ANTHROPIC_API_KEY=... JARVIS_TOKEN=... uvicorn app.main:app --reload
-python -m pytest -q
-```
-
-### 2. App
-
-Cada cambio compila el APK automáticamente en GitHub Actions (pestaña **Actions**, ejecución más reciente, artefacto `ultra-yo-apk`). Descárgalo en el teléfono, descomprímelo e instálalo (Android pedirá permiso para instalar apps de origen desconocido).
-
-Al abrirla por primera vez, en **Ajustes** pon la dirección del servidor y el `JARVIS_TOKEN`.
-
-### 3. Abrirla con el botón lateral (Samsung)
+### Abrirla con el botón lateral (Samsung)
 
 Ajustes → Funciones avanzadas → Botón lateral → Pulsar dos veces → Abrir app → Ultra Yo.
 
-La app se muestra encima de la pantalla de bloqueo y empieza a escuchar sola. Con el teléfono bloqueado los ajustes quedan ocultos.
+La app se muestra encima de la pantalla de bloqueo y empieza a escuchar sola. Con el teléfono bloqueado, la memoria no se puede ver ni cambiar.
 
-## Próximas fases
+## Próximos pasos
 
-2. Palabra de activación ("Jarvis") con la pantalla bloqueada, sin tocar nada.
-3. Herramientas para tus proyectos: GitHub, código, notas.
-4. Control del teléfono y memoria a largo plazo.
+- Palabra de activación ("Jarvis") con la pantalla bloqueada, sin tocar nada.
+- Que pueda hacer cosas en el teléfono: alarmas, recordatorios, abrir apps.
