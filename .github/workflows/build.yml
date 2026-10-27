@@ -20,7 +20,6 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew assembleDebug --no-daemon
-      - run: ./gradlew :app:dependencies --configuration debugRuntimeClasspath --no-daemon | grep litertlm
       - uses: actions/upload-artifact@v4
         with:
           name: ultra-yo-apk
