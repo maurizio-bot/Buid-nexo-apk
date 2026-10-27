@@ -4,7 +4,7 @@ Tu propia IA, tipo Jarvis, que vive **dentro de tu teléfono Android**. No se co
 
 ## Cómo se usa
 
-1. **Instala la app.** Cada cambio se compila solo en GitHub Actions (pestaña **Actions**, ejecución más reciente, artefacto `ultra-yo-apk`). Descárgalo en el teléfono, descomprímelo e instala el APK; Android pedirá permiso para instalar apps de origen desconocido.
+1. **Instala la app.** Desde el teléfono, abre la sección **Releases** del repositorio, entra en la versión más reciente y descarga `ultra-yo.apk`. Android pedirá permiso para instalar apps de origen desconocido. Las versiones nuevas se instalan encima sin perder la memoria ni el modelo.
 2. **Descarga su cerebro.** La primera vez la app descarga el modelo (unos 2,6 GB, mejor con wifi). Solo se hace una vez.
 3. **Háblale.** Toca **Hablar** y pregúntale lo que quieras. Te responde en voz alta.
 

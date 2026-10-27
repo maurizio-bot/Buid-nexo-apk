@@ -16,6 +16,17 @@ android {
         versionName = "0.2.0"
     }
 
+    // Firma fija para que cada versión nueva se instale encima de la anterior
+    // sin borrar la memoria ni el modelo descargado.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("firma.keystore")
+            storePassword = "ultrayo"
+            keyAlias = "ultrayo"
+            keyPassword = "ultrayo"
+        }
+    }
+
     buildFeatures {
         compose = true
     }
