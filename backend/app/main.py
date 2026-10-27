@@ -7,7 +7,7 @@ Variables de entorno:
   JARVIS_TOKEN       contraseña compartida con la app del teléfono (obligatoria)
   LLM_PROVIDER       ollama (por defecto) | claude
   OLLAMA_URL         dirección de Ollama (por defecto http://localhost:11434)
-  OLLAMA_MODEL       modelo de Ollama (por defecto gemma4:e4b)
+  OLLAMA_MODEL       modelo de Ollama (por defecto gemma4:e2b)
   ANTHROPIC_API_KEY  clave de la API de Claude (solo con LLM_PROVIDER=claude)
   CLAUDE_MODEL       modelo de Claude (por defecto claude-opus-5-5)
   CLAUDE_EFFORT      low | medium | high | xhigh | max (por defecto low, para responder rápido por voz)
@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e2b")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5-5")
 CLAUDE_EFFORT = os.environ.get("CLAUDE_EFFORT", "low")
 MAX_HISTORY = 40

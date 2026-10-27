@@ -76,7 +76,7 @@ def test_ollama_is_default(ollama):
     req = ollama["requests"][0]
     assert req.url == "http://localhost:11434/api/chat"
     body = json.loads(req.content)
-    assert body["model"] == "gemma4:e4b"
+    assert body["model"] == "gemma4:e2b"
     assert body["stream"] is False
     assert body["messages"][0]["role"] == "system"
     assert body["messages"][1:] == [{"role": "user", "content": "hola"}]
@@ -91,7 +91,7 @@ def test_ollama_missing_model(ollama):
     ollama["status"] = 404
     r = client.post("/chat", json=HOLA, headers=AUTH)
     assert r.status_code == 502
-    assert "ollama pull gemma4:e4b" in r.json()["detail"]
+    assert "ollama pull gemma4:e2b" in r.json()["detail"]
 
 
 def test_ollama_down(ollama):

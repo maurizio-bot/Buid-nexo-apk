@@ -7,15 +7,15 @@ Asistente personal de voz tipo Jarvis para Android, con tu propia IA como cerebr
 
 ## Puesta en marcha
 
-Ultra Yo usa **tu propia IA**: un modelo abierto (por defecto Gemma 4 de Google) que corre en tu PC con [Ollama](https://ollama.com). Es gratis, privado y no depende de nadie. El teléfono llega al PC desde cualquier sitio con [Tailscale](https://tailscale.com), una red privada gratuita, sin abrir nada a internet.
+Ultra Yo usa **tu propia IA**: un modelo abierto (por defecto Gemma 4 E2B de Google) que corre en tu PC con [Ollama](https://ollama.com). Es gratis, privado y no depende de nadie. El teléfono llega al PC desde cualquier sitio con [Tailscale](https://tailscale.com), una red privada gratuita, sin abrir nada a internet.
 
 ### 1. Servidor en tu PC (Windows)
 
 1. Instala **Ollama** desde ollama.com y, en una terminal, descarga el modelo:
    ```
-   ollama pull gemma4:e4b
+   ollama pull gemma4:e2b
    ```
-   Si tu PC va justo de memoria, usa `gemma4:e2b`; si tiene una tarjeta gráfica con 16 GB o más, prueba `gemma4:26b`. Para cambiar de modelo, define la variable `OLLAMA_MODEL`.
+   Es el modelo más ligero y funciona sin tarjeta gráfica dedicada. Si tu PC tiene una tarjeta gráfica con 8 GB o más, prueba `gemma4:e4b`, que es más listo. Para cambiar de modelo, define la variable `OLLAMA_MODEL`.
 2. Instala **Python** desde python.org (marca "Add Python to PATH").
 3. Descarga este repositorio (botón verde **Code** → **Download ZIP**) y descomprímelo.
 4. Haz doble clic en `backend\iniciar.bat`. La primera vez instala lo necesario y te muestra el **token** que pondrás en la app. Deja esa ventana abierta.
@@ -25,7 +25,7 @@ Ultra Yo usa **tu propia IA**: un modelo abierto (por defecto Gemma 4 de Google)
    ```
    Te dará una dirección del tipo `https://tu-pc.algo.ts.net`. Esa es la **dirección del servidor** para la app.
 
-Variables opcionales: `OLLAMA_URL` (por defecto `http://localhost:11434`), `OLLAMA_MODEL` (por defecto `gemma4:e4b`).
+Variables opcionales: `OLLAMA_URL` (por defecto `http://localhost:11434`), `OLLAMA_MODEL` (por defecto `gemma4:e2b`).
 
 #### Usar Claude en vez de tu IA (opcional, de pago)
 
