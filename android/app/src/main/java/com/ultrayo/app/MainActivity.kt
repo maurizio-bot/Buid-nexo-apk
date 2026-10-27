@@ -127,7 +127,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startDownload() {
-        downloader.start()
+        try {
+            downloader.start()
+        } catch (e: Exception) {
+            download = DownloadState.Failed(-1)
+            status = "No pude empezar la descarga: ${e.message}"
+            return
+        }
         watchDownload()
     }
 
@@ -310,7 +316,7 @@ class MainActivity : ComponentActivity() {
                     LinearProgressIndicator(progress = { d.progress }, modifier = Modifier.fillMaxWidth())
                 }
                 is DownloadState.Failed -> {
-                    Text("La descarga falló (código ${d.reason}).", color = Color.LightGray)
+                    Text("La descarga falló (código ${d.reason}). $status", color = Color.LightGray)
                     Button(onClick = { startDownload() }) { Text("Reintentar") }
                 }
                 DownloadState.Done -> Text(status, color = Color.LightGray)

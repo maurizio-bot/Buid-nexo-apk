@@ -19,13 +19,12 @@ class Brain(private val modelPath: String, private val cacheDir: String) {
     private var engine: Engine? = null
     private var conversation: Conversation? = null
 
-    /** Carga el modelo. Intenta usar la GPU y, si no puede, el procesador. */
+    /**
+     * Carga el modelo en el procesador. Es casi tan rápido como la GPU para respuestas cortas
+     * y evita cierres de la app si el controlador gráfico falla en código nativo.
+     */
     fun load() {
-        engine = try {
-            start(Backend.GPU())
-        } catch (e: Exception) {
-            start(Backend.CPU())
-        }
+        engine = start(Backend.CPU())
     }
 
     private fun start(backend: Backend): Engine {
