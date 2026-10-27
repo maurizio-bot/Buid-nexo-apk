@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.KeyguardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -80,6 +81,15 @@ class MainActivity : ComponentActivity() {
     /** Hay que reiniciar la conversación del modelo (cambió la memoria o se borró el chat). */
     private var brainDirty = true
 
+    private var folders by mutableStateOf<List<Uri>>(emptyList())
+
+    private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            Folders.add(this, uri)
+            folders = Folders.list(this)
+        }
+    }
+
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startListening() else status = "Necesito permiso para usar el micrófono"
     }
@@ -88,6 +98,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         memory = Memory(this)
         lastCrash = App.crashFile(this).takeIf { it.exists() }?.readText()
+        folders = Folders.list(this)
         downloader = ModelDownloader(this)
         tts = TextToSpeech(this) { result ->
             if (result == TextToSpeech.SUCCESS) {
@@ -168,7 +179,7 @@ class MainActivity : ComponentActivity() {
             try {
                 withContext(Ai.thread) {
                     if (Ai.brain == null) {
-                        Ai.brain = Brain(downloader.file.path, cacheDir.path).also { it.load() }
+                        Ai.brain = Brain(downloader.file.path, cacheDir.path, PhoneTools(applicationContext)).also { it.load() }
                     }
                 }
                 brainReady = true
@@ -227,22 +238,23 @@ class MainActivity : ComponentActivity() {
         r.startListening(intent)
     }
 
-    private fun say(text: String) {
+    private fun say(text: String, aloud: Boolean) {
         turns.add(Turn("assistant", text))
         status = ""
         val spoken = text.replace(Regex("[*#_`>|]"), "")
-        if (ttsReady) tts?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "reply")
+        if (aloud && ttsReady) tts?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "reply")
     }
 
     // --- Conversación ---
 
-    private fun send(text: String) {
+    /** [aloud]: responder en voz alta (cuando se le habló) o solo por escrito (cuando se le escribió). */
+    private fun send(text: String, aloud: Boolean = true) {
         val history = turns.takeLast(MAX_HISTORY)
         turns.add(Turn("user", text))
 
         Teaching.handle(text, memory)?.let { answer ->
             brainDirty = true
-            say(answer)
+            say(answer, aloud)
             return
         }
 
@@ -264,7 +276,7 @@ class MainActivity : ComponentActivity() {
                 null
             }
             thinking = false
-            if (reply != null) say(reply.ifBlank { "No sé qué responder a eso." })
+            if (reply != null) say(reply.ifBlank { "No sé qué responder a eso." }, aloud)
         }
     }
 
@@ -374,6 +386,24 @@ class MainActivity : ComponentActivity() {
 
             Text(status, color = Color.LightGray, modifier = Modifier.padding(vertical = 8.dp))
 
+            var typed by remember { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = typed,
+                    onValueChange = { typed = it },
+                    placeholder = { Text("Escríbele…") },
+                    maxLines = 4,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(
+                    onClick = {
+                        send(typed.trim(), aloud = false)
+                        typed = ""
+                    },
+                    enabled = typed.isNotBlank() && !thinking
+                ) { Text("Enviar") }
+            }
+
             Button(
                 onClick = { if (listening) recognizer?.stopListening() else startListening() },
                 enabled = !thinking,
@@ -399,6 +429,22 @@ class MainActivity : ComponentActivity() {
         var facts by remember { mutableStateOf(memory.facts()) }
 
         LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item {
+                Text("Carpetas que puede leer", color = Accent)
+                Text("Solo lectura: puede buscar y leer archivos, nunca cambiarlos ni borrarlos.", color = Color.LightGray)
+            }
+            items(folders) { uri ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(Folders.name(this@MainActivity, uri), color = Color.White, modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        Folders.remove(this@MainActivity, uri)
+                        folders = Folders.list(this@MainActivity)
+                    }) { Text("Quitar") }
+                }
+            }
+            item {
+                Button(onClick = { pickFolder.launch(null) }) { Text("Dar acceso a una carpeta") }
+            }
             item {
                 Text("Personalidad", color = Accent)
                 OutlinedTextField(

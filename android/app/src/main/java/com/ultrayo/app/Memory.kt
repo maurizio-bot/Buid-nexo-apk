@@ -41,6 +41,11 @@ class Memory(context: Context) {
 
     fun systemPrompt(): String = buildString {
         append(personality)
+        append(
+            "\n\nPuedes usar herramientas para ver qué apps hay en el teléfono, abrirlas, y buscar y leer " +
+                "archivos de las carpetas que Maurizio te ha permitido. Solo puedes leer: no puedes " +
+                "cambiar ni borrar nada. Úsalas solo cuando te lo pida."
+        )
         val facts = facts()
         if (facts.isNotEmpty()) {
             append("\n\nCosas que Maurizio te ha enseñado y que debes tener siempre en cuenta:\n")

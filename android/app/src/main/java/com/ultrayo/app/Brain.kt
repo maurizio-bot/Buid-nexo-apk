@@ -7,6 +7,8 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.ToolSet
+import com.google.ai.edge.litertlm.tool
 
 data class Turn(val role: String, val content: String)
 
@@ -14,7 +16,11 @@ data class Turn(val role: String, val content: String)
  * El modelo de IA que corre dentro del teléfono (Gemma con LiteRT-LM).
  * Todas las llamadas son lentas y deben hacerse desde un mismo hilo en segundo plano.
  */
-class Brain(private val modelPath: String, private val cacheDir: String) {
+class Brain(
+    private val modelPath: String,
+    private val cacheDir: String,
+    private val tools: ToolSet,
+) {
 
     private var engine: Engine? = null
     private var conversation: Conversation? = null
@@ -47,6 +53,7 @@ class Brain(private val modelPath: String, private val cacheDir: String) {
                 initialMessages = history.map {
                     if (it.role == "user") Message.user(it.content) else Message.model(it.content)
                 },
+                tools = listOf(tool(tools)),
             )
         )
     }

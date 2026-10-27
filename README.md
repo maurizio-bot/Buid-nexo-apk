@@ -18,6 +18,16 @@ Tu IA aprende lo que le digas y lo guarda en el teléfono:
 
 En **Memoria** puedes ver, añadir y borrar lo que sabe, y cambiar su **personalidad**: su nombre, cómo habla y qué hace.
 
+### Escríbele
+
+Si no puedes hablar, escribe en la caja de abajo y pulsa **Enviar**. Cuando le escribes, responde solo por escrito.
+
+### Acceso al teléfono (solo lectura)
+
+- **Apps:** puede decirte qué apps tienes y abrirlas ("abre WhatsApp").
+- **Archivos:** en **Memoria → Dar acceso a una carpeta** eliges qué carpetas puede ver. Puede buscar archivos y leer los de texto ("¿qué pone en notas.txt?"). Nunca cambia ni borra nada, y puedes quitarle el acceso cuando quieras.
+- Con el teléfono bloqueado no puede usar ni apps ni archivos.
+
 ### Abrirla con el botón lateral (Samsung)
 
 Ajustes → Funciones avanzadas → Botón lateral → Pulsar dos veces → Abrir app → Ultra Yo.
