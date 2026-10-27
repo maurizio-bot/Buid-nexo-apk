@@ -45,6 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -73,6 +75,7 @@ class MainActivity : ComponentActivity() {
     private var locked by mutableStateOf(false)
     private var download by mutableStateOf<DownloadState>(DownloadState.None)
     private var brainReady by mutableStateOf(Ai.brain != null)
+    private var lastCrash by mutableStateOf<String?>(null)
 
     /** Hay que reiniciar la conversación del modelo (cambió la memoria o se borró el chat). */
     private var brainDirty = true
@@ -84,6 +87,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         memory = Memory(this)
+        lastCrash = App.crashFile(this).takeIf { it.exists() }?.readText()
         downloader = ModelDownloader(this)
         tts = TextToSpeech(this) { result ->
             if (result == TextToSpeech.SUCCESS) {
@@ -141,7 +145,12 @@ class MainActivity : ComponentActivity() {
         if (downloadWatcher?.isActive == true) return
         downloadWatcher = lifecycleScope.launch {
             while (true) {
-                download = downloader.state()
+                download = try {
+                    downloader.state()
+                } catch (e: Exception) {
+                    status = "No pude ver cómo va la descarga: ${e.message}"
+                    DownloadState.Failed(-2)
+                }
                 if (download !is DownloadState.Running) break
                 delay(1000)
             }
@@ -294,9 +303,31 @@ class MainActivity : ComponentActivity() {
             }
 
             when {
+                lastCrash != null -> CrashScreen(lastCrash.orEmpty(), Modifier.weight(1f))
                 showMemory && !locked -> MemoryScreen(Modifier.weight(1f))
                 !brainReady -> SetupScreen(Modifier.weight(1f))
                 else -> ChatScreen(Modifier.weight(1f))
+            }
+        }
+    }
+
+    @Composable
+    private fun CrashScreen(report: String, modifier: Modifier) {
+        val clipboard = LocalClipboardManager.current
+        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                "La app se cerró por un error. Haz una captura de esta pantalla y mándasela a Claude.",
+                color = Color.White
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { clipboard.setText(AnnotatedString(report)) }) { Text("Copiar") }
+                TextButton(onClick = {
+                    App.crashFile(this@MainActivity).delete()
+                    lastCrash = null
+                }) { Text("Cerrar") }
+            }
+            LazyColumn(Modifier.weight(1f)) {
+                item { Text(report.take(4000), color = Color.LightGray, style = MaterialTheme.typography.bodySmall) }
             }
         }
     }
