@@ -21,7 +21,7 @@ data class Turn(val role: String, val content: String, val image: String? = null
 class Brain(
     private val modelPath: String,
     private val cacheDir: String,
-    private val tools: ToolSet,
+    private val tools: List<ToolSet>,
 ) {
 
     private var engine: Engine? = null
@@ -69,7 +69,7 @@ class Brain(
                 initialMessages = history.map {
                     if (it.role == "user") Message.user(it.content) else Message.model(it.content)
                 },
-                tools = listOf(tool(tools)),
+                tools = tools.map { tool(it) },
             )
         )
     }

@@ -6,7 +6,7 @@ Tu propia IA, tipo Jarvis, que vive **dentro de tu teléfono Android**. No se co
 
 1. **Instala la app.** Desde el teléfono, abre la sección **Releases** del repositorio, entra en la versión más reciente y descarga `ultra-yo.apk`. Android pedirá permiso para instalar apps de origen desconocido. Las versiones nuevas se instalan encima sin perder la memoria ni el modelo.
 2. **Descarga su cerebro.** La primera vez la app descarga el modelo (unos 2,6 GB, mejor con wifi). Solo se hace una vez.
-3. **Háblale.** Toca **Hablar** y pregúntale lo que quieras. Te responde en voz alta.
+3. **Háblale.** Toca el reactor (el círculo azul) y pregúntale lo que quieras. Te responde en voz alta.
 
 ### Enséñale
 
@@ -16,7 +16,19 @@ Tu IA aprende lo que le digas y lo guarda en el teléfono:
 - "Olvida lo de NEXO" → borra ese recuerdo. "Olvida todo" → borra todos.
 - "¿Qué sabes de mí?" → te dice lo que le has enseñado.
 
-En **Memoria** puedes ver, añadir y borrar lo que sabe, y cambiar su **personalidad**: su nombre, cómo habla y qué hace.
+En **Memoria** (el engranaje) puedes ver, añadir y borrar lo que sabe, y cambiar su **personalidad**: su nombre, cómo habla y qué hace.
+
+### Que se reescriba a sí mismo
+
+Puedes pedirle que cambie su propia forma de ser y sus reglas:
+
+- "Cámbiate la personalidad: quiero que seas más formal y me llames señor."
+- "Créate una habilidad llamada Modo programador: cuando la active, respóndeme con código y explicaciones cortas."
+- "Borra tu habilidad Modo programador." / "Borra el recuerdo de NEXO."
+
+Él escribe el cambio y te lo enseña en una tarjeta. **No se aplica hasta que pulses Aplicar.** Si después no te gusta, di "deshaz el último cambio" o usa **Memoria → Deshacer último cambio** (guarda los últimos 20 cambios).
+
+Lo que cambia es su "mente" (personalidad, habilidades y memoria), no el programa de la app: eso solo cambia con una versión nueva.
 
 ### Escríbele
 

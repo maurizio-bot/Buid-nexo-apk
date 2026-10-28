@@ -240,7 +240,11 @@ class MainActivity : ComponentActivity() {
             try {
                 withContext(Ai.thread) {
                     if (Ai.brain == null) {
-                        Ai.brain = Brain(downloader.file.path, cacheDir.path, PhoneTools(applicationContext)).also { it.load() }
+                        Ai.brain = Brain(
+                            downloader.file.path,
+                            cacheDir.path,
+                            listOf(PhoneTools(applicationContext), SelfTools(applicationContext)),
+                        ).also { it.load() }
                     }
                 }
                 brainReady = true
@@ -431,6 +435,7 @@ class MainActivity : ComponentActivity() {
 
     private fun newChat() {
         turns.clear()
+        SelfEdits.pending.value = null
         attachment = null
         brainDirty = true
         status = ""
@@ -619,6 +624,7 @@ class MainActivity : ComponentActivity() {
             if (status.isNotBlank()) {
                 Text(status, color = UltraColors.Muted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
             }
+            SelfEdits.pending.value?.let { if (!locked) SelfChangeCard(it) }
             attachment?.let { AttachmentChip(it) }
             InputBar()
         }
@@ -732,11 +738,36 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun MemoryScreen(modifier: Modifier) {
-        var personality by remember { mutableStateOf(memory.personality) }
+        // Cambia cada vez que se deshace algo, para volver a leer la memoria.
+        var version by remember { mutableStateOf(0) }
+        var personality by remember(version) { mutableStateOf(memory.personality) }
         var newFact by remember { mutableStateOf("") }
-        var facts by remember { mutableStateOf(memory.facts()) }
+        var facts by remember(version) { mutableStateOf(memory.facts()) }
+        var skills by remember(version) { mutableStateOf(memory.skills()) }
+        var skillName by remember { mutableStateOf("") }
+        var skillText by remember { mutableStateOf("") }
+        var canUndo by remember(version) { mutableStateOf(memory.canUndo()) }
+
+        fun changed() {
+            facts = memory.facts()
+            skills = memory.skills()
+            canUndo = memory.canUndo()
+            brainDirty = true
+        }
 
         LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (canUndo) {
+                item {
+                    Card {
+                        SectionTitle("Deshacer", "Vuelve a como estaba antes del último cambio en su mente.")
+                        GlowButton("Deshacer último cambio", onClick = {
+                            memory.undo()
+                            brainDirty = true
+                            version++
+                        }, Modifier.fillMaxWidth())
+                    }
+                }
+            }
             item {
                 Card {
                     SectionTitle("Carpetas que puede leer", "Solo lectura: puede buscar y leer archivos, nunca cambiarlos ni borrarlos.")
@@ -754,7 +785,7 @@ class MainActivity : ComponentActivity() {
             }
             item {
                 Card {
-                    SectionTitle("Personalidad", "Cómo es y cómo te habla.")
+                    SectionTitle("Personalidad", "Cómo es y cómo te habla. También puedes pedirle que se la cambie él mismo.")
                     OutlinedTextField(
                         value = personality,
                         onValueChange = { personality = it },
@@ -762,22 +793,67 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth()
                     )
                     TextButton(onClick = {
+                        memory.snapshot()
                         memory.personality = personality
                         personality = memory.personality
-                        brainDirty = true
+                        changed()
                     }) { Text("Guardar personalidad") }
                 }
             }
             item {
                 Card {
-                    SectionTitle("Lo que le has enseñado", "También puedes decirle \"recuerda que…\" u \"olvida…\".")
+                    SectionTitle("Habilidades", "Instrucciones con nombre, como \"Modo programador\". Puede crearlas, reescribirlas o borrarlas si se lo pides.")
+                    skills.forEach { (name, text) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("⚡  $name", color = UltraColors.Accent, fontWeight = FontWeight.SemiBold)
+                                Text(text, color = UltraColors.Text, fontSize = 13.sp)
+                            }
+                            TextButton(onClick = {
+                                memory.snapshot()
+                                memory.removeSkill(name)
+                                changed()
+                            }) { Text("Borrar") }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = skillName,
+                        onValueChange = { skillName = it },
+                        label = { Text("Nombre") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = skillText,
+                        onValueChange = { skillText = it },
+                        label = { Text("Qué debe hacer") },
+                        minLines = 2,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    GlowButton(
+                        "Guardar habilidad",
+                        onClick = {
+                            memory.snapshot()
+                            memory.setSkill(skillName, skillText)
+                            skillName = ""
+                            skillText = ""
+                            changed()
+                        },
+                        enabled = skillName.isNotBlank() && skillText.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            item {
+                Card {
+                    SectionTitle("Lo que le has enseñado", "También puedes decirle \"recuerda que…\", \"olvida…\" o \"deshaz el último cambio\".")
                     facts.forEachIndexed { index, fact ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("•  $fact", color = UltraColors.Text, modifier = Modifier.weight(1f))
                             TextButton(onClick = {
+                                memory.snapshot()
                                 memory.removeAt(index)
-                                facts = memory.facts()
-                                brainDirty = true
+                                changed()
                             }) { Text("Borrar") }
                         }
                     }
@@ -790,10 +866,10 @@ class MainActivity : ComponentActivity() {
                     GlowButton(
                         "Añadir",
                         onClick = {
+                            memory.snapshot()
                             memory.add(newFact.trim())
                             newFact = ""
-                            facts = memory.facts()
-                            brainDirty = true
+                            changed()
                         },
                         enabled = newFact.isNotBlank(),
                         modifier = Modifier.fillMaxWidth(),
@@ -801,6 +877,46 @@ class MainActivity : ComponentActivity() {
                 }
             }
             item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+
+    /** Tarjeta para aceptar o rechazar un cambio que la IA quiere hacerse a sí misma. */
+    @Composable
+    private fun SelfChangeCard(change: SelfChange) {
+        Column(
+            Modifier
+                .padding(bottom = 8.dp)
+                .fillMaxWidth()
+                .glass()
+                .border(1.dp, UltraColors.AccentBright, RoundedCornerShape(20.dp))
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SectionTitle("Ultra Yo quiere cambiarse", change.description)
+            if (change.detail.isNotBlank()) {
+                Text(
+                    change.detail.take(600),
+                    color = UltraColors.Text,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .glass(12.dp)
+                        .padding(10.dp),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                GlowButton("Aplicar", onClick = {
+                    memory.snapshot()
+                    change.apply(memory)
+                    SelfEdits.pending.value = null
+                    brainDirty = true
+                    say("Hecho: ${change.description.replaceFirstChar { it.lowercase() }}. Si no te gusta, dime \"deshaz el último cambio\".", aloud = false)
+                })
+                TextButton(onClick = {
+                    SelfEdits.pending.value = null
+                    say("Vale, lo dejo como estaba.", aloud = false)
+                }) { Text("No") }
+            }
         }
     }
 
