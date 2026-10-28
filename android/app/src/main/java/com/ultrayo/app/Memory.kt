@@ -97,7 +97,7 @@ class Memory(context: Context) {
         append(personality)
         append(
             "\n\nPuedes usar herramientas para ver qué apps hay en el teléfono, abrirlas, y buscar y leer " +
-                "archivos de las carpetas que Maurizio te ha permitido. Solo puedes leer: no puedes " +
+                "archivos de las carpetas que Maurizio te ha permitido, y pasarle una pregunta a Claude abriendo su app. Solo puedes leer: no puedes " +
                 "cambiar ni borrar nada. Úsalas solo cuando te lo pida." +
                 "\n\nSi Maurizio te pide que cambies tu forma de ser, tus reglas o tus habilidades, usa las " +
                 "herramientas proponer… para cambiarte o borrarte a ti mismo. Maurizio confirma cada cambio en la " +

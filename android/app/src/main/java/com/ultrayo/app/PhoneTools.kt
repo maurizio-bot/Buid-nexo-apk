@@ -90,6 +90,14 @@ class PhoneTools(context: Context) : ToolSet {
         return "No encontré ese archivo."
     }
 
+    @Tool(description = "Pasa una pregunta a Claude, la IA de Anthropic, abriendo su app. Úsalo solo si Maurizio pide preguntarle a Claude.")
+    fun preguntarAClaude(
+        @ToolParam(description = "La pregunta completa para Claude, con todo el contexto necesario") pregunta: String,
+    ): String {
+        if (locked()) return LOCKED
+        return ClaudeLink.open(context, pregunta)
+    }
+
     private fun walk(dir: DocumentFile, path: String, depth: Int, visit: (String, DocumentFile) -> Boolean): Boolean {
         if (depth > 6) return true
         for (child in dir.listFiles()) {

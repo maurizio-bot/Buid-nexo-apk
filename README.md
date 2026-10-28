@@ -36,6 +36,10 @@ Si no puedes hablar, escribe en la barra de abajo y pulsa la flecha de enviar. C
 
 Con el botón **+** puedes adjuntar una **foto** (te dice qué ve) o un **archivo de texto** (código, notas, .txt, .md, .json…). Solo los lee, nunca los cambia.
 
+### Pregúntale a Claude
+
+Di o escribe "pregúntale a Claude …" y Ultra Yo abre la app de Claude (o claude.ai si no la tienes) con la pregunta ya escrita. Es gratis: usa tu cuenta normal, sin API ni clave. La respuesta la ves tú en la app de Claude.
+
 ### Acceso al teléfono (solo lectura)
 
 - **Apps:** puede decirte qué apps tienes y abrirlas ("abre WhatsApp").

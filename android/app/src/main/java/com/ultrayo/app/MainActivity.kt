@@ -395,6 +395,14 @@ class MainActivity : ComponentActivity() {
         turns.add(Turn("user", text, image = attached?.imagePath, fileName = attached?.name))
 
         if (attached == null) {
+            ClaudeLink.questionIn(text)?.let { question ->
+                if (locked) {
+                    say("Desbloquea el teléfono y te paso a Claude.", aloud)
+                } else {
+                    say(ClaudeLink.open(this, question), aloud)
+                }
+                return
+            }
             Teaching.handle(text, memory)?.let { answer ->
                 brainDirty = true
                 say(answer, aloud)
