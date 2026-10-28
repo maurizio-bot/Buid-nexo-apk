@@ -7,21 +7,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  backend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -r requirements-dev.txt
-      - run: python -m pytest -q
-
   apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: android
@@ -37,3 +26,14 @@ jobs:
         with:
           name: ultra-yo-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Publicar en Releases
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk ultra-yo.apk
+          gh release create "v0.2.${{ github.run_number }}" ultra-yo.apk \
+            --target "${{ github.sha }}" \
+            --title "Ultra Yo 0.2.${{ github.run_number }}" \
+            --notes "Descarga ultra-yo.apk en el teléfono e instálalo." \
+            $([ "${{ github.ref_name }}" = "main" ] || echo --prerelease)

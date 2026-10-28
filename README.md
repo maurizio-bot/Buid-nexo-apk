@@ -1,48 +1,68 @@
 # Ultra Yo
 
-Asistente personal de voz tipo Jarvis para Android, con Claude como cerebro.
+Tu propia IA, tipo Jarvis, que vive **dentro de tu teléfono Android**. No se conecta a ningún servicio: el modelo (Gemma 4 E2B, abierto, de Google) se ejecuta en el propio teléfono con [LiteRT-LM](https://developers.google.com/edge/litert-lm/overview). Es gratis, privado y funciona sin internet.
 
-- `android/`: la app del teléfono (Kotlin + Jetpack Compose). Pulsas, hablas y te responde en voz alta.
-- `backend/`: el servidor (Python + FastAPI). Recibe la conversación, se la pasa a Claude y devuelve la respuesta. La clave de la API de Claude vive solo aquí, nunca en el teléfono.
+## Cómo se usa
 
-## Fase 1: puesta en marcha
+1. **Instala la app.** Desde el teléfono, abre la sección **Releases** del repositorio, entra en la versión más reciente y descarga `ultra-yo.apk`. Android pedirá permiso para instalar apps de origen desconocido. Las versiones nuevas se instalan encima sin perder la memoria ni el modelo.
+2. **Descarga su cerebro.** La primera vez la app descarga el modelo (unos 2,6 GB, mejor con wifi). Solo se hace una vez.
+3. **Háblale.** Toca el reactor (el círculo azul) y pregúntale lo que quieras. Te responde en voz alta.
 
-### 1. Servidor
+### Di "Ultra"
 
-Necesita dos variables de entorno:
+Después de cargar el modelo, la app descarga también un "oído" pequeño (unos 40 MB, una sola vez) y se queda escuchando la palabra **"Ultra"**, aunque la cierres o bloquees el teléfono. Verás un aviso fijo de "Ultra Yo te escucha".
 
-| Variable | Qué es |
-|---|---|
-| `ANTHROPIC_API_KEY` | Tu clave de la API de Claude (console.anthropic.com). |
-| `JARVIS_TOKEN` | Una contraseña larga que inventes tú. La app la usa para que nadie más pueda usar tu servidor. |
+- Di "Ultra", espera un instante y habla. Te contesta en voz alta y sigue escuchando, así que puedes conversar sin repetir "Ultra". Cuando te callas, vuelve a esperar la palabra.
+- Siempre contesta por voz, también cuando le escribes. Di o escribe **"modo texto"** para que conteste por escrito, y **"modo voz"** para volver.
+- Se apaga desde el aviso ("Dejar de escuchar") o en Ajustes → Voz.
+- En Samsung, para que Android no la cierre: Ajustes → Aplicaciones → Ultra Yo → Batería → **Sin restricciones**.
 
-Opcionales: `CLAUDE_MODEL` (por defecto `claude-opus-5-5`) y `CLAUDE_EFFORT` (por defecto `low`, para que responda rápido por voz).
+La palabra "Ultra" se reconoce dentro del teléfono, sin enviar nada a internet.
 
-Para desplegarlo en Railway: crea un proyecto desde este repositorio, pon `backend` como directorio raíz (usa el `Dockerfile`), añade las dos variables y genera un dominio público. Comprueba que `https://TU-DOMINIO/health` responde `{"ok": true}`.
+### Enséñale
 
-En local:
+Tu IA aprende lo que le digas y lo guarda en el teléfono:
 
-```bash
-cd backend
-pip install -r requirements-dev.txt
-ANTHROPIC_API_KEY=... JARVIS_TOKEN=... uvicorn app.main:app --reload
-python -m pytest -q
-```
+- "Recuerda que mi proyecto se llama NEXO" → lo apunta y lo tendrá siempre en cuenta.
+- "Olvida lo de NEXO" → borra ese recuerdo. "Olvida todo" → borra todos.
+- "¿Qué sabes de mí?" → te dice lo que le has enseñado.
 
-### 2. App
+En **Memoria** (el engranaje) puedes ver, añadir y borrar lo que sabe, y cambiar su **personalidad**: su nombre, cómo habla y qué hace.
 
-Cada cambio compila el APK automáticamente en GitHub Actions (pestaña **Actions**, ejecución más reciente, artefacto `ultra-yo-apk`). Descárgalo en el teléfono, descomprímelo e instálalo (Android pedirá permiso para instalar apps de origen desconocido).
+### Que se reescriba a sí mismo
 
-Al abrirla por primera vez, en **Ajustes** pon la dirección del servidor y el `JARVIS_TOKEN`.
+Puedes pedirle que cambie su propia forma de ser y sus reglas:
 
-### 3. Abrirla con el botón lateral (Samsung)
+- "Cámbiate la personalidad: quiero que seas más formal y me llames señor."
+- "Créate una habilidad llamada Modo programador: cuando la active, respóndeme con código y explicaciones cortas."
+- "Borra tu habilidad Modo programador." / "Borra el recuerdo de NEXO."
+
+Él escribe el cambio y te lo enseña en una tarjeta. **No se aplica hasta que pulses Aplicar.** Si después no te gusta, di "deshaz el último cambio" o usa **Memoria → Deshacer último cambio** (guarda los últimos 20 cambios).
+
+Lo que cambia es su "mente" (personalidad, habilidades y memoria), no el programa de la app: eso solo cambia con una versión nueva.
+
+### Escríbele
+
+Si no puedes hablar, escribe en la barra de abajo y pulsa la flecha de enviar. Cuando le escribes, responde solo por escrito.
+
+Con el botón **+** puedes adjuntar una **foto** (te dice qué ve) o un **archivo de texto** (código, notas, .txt, .md, .json…). Solo los lee, nunca los cambia.
+
+### Pregúntale a Claude
+
+Di o escribe "pregúntale a Claude …" y Ultra Yo abre la app de Claude (o claude.ai si no la tienes) con la pregunta ya escrita. Es gratis: usa tu cuenta normal, sin API ni clave. La respuesta la ves tú en la app de Claude.
+
+### Acceso al teléfono (solo lectura)
+
+- **Apps:** puede decirte qué apps tienes y abrirlas ("abre WhatsApp").
+- **Archivos:** en **Memoria → Dar acceso a una carpeta** eliges qué carpetas puede ver. Puede buscar archivos y leer los de texto ("¿qué pone en notas.txt?"). Nunca cambia ni borra nada, y puedes quitarle el acceso cuando quieras.
+- Con el teléfono bloqueado no puede usar ni apps ni archivos.
+
+### Abrirla con el botón lateral (Samsung)
 
 Ajustes → Funciones avanzadas → Botón lateral → Pulsar dos veces → Abrir app → Ultra Yo.
 
-La app se muestra encima de la pantalla de bloqueo y empieza a escuchar sola. Con el teléfono bloqueado los ajustes quedan ocultos.
+La app se muestra encima de la pantalla de bloqueo y empieza a escuchar sola. Con el teléfono bloqueado, la memoria no se puede ver ni cambiar.
 
-## Próximas fases
+## Próximos pasos
 
-2. Palabra de activación ("Jarvis") con la pantalla bloqueada, sin tocar nada.
-3. Herramientas para tus proyectos: GitHub, código, notas.
-4. Control del teléfono y memoria a largo plazo.
+- Que pueda hacer cosas en el teléfono: alarmas, recordatorios, abrir apps.
