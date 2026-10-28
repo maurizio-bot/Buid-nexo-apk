@@ -8,6 +8,17 @@ Tu propia IA, tipo Jarvis, que vive **dentro de tu teléfono Android**. No se co
 2. **Descarga su cerebro.** La primera vez la app descarga el modelo (unos 2,6 GB, mejor con wifi). Solo se hace una vez.
 3. **Háblale.** Toca el reactor (el círculo azul) y pregúntale lo que quieras. Te responde en voz alta.
 
+### Di "Ultra"
+
+Después de cargar el modelo, la app descarga también un "oído" pequeño (unos 40 MB, una sola vez) y se queda escuchando la palabra **"Ultra"**, aunque la cierres o bloquees el teléfono. Verás un aviso fijo de "Ultra Yo te escucha".
+
+- Di "Ultra", espera un instante y habla. Te contesta en voz alta y sigue escuchando, así que puedes conversar sin repetir "Ultra". Cuando te callas, vuelve a esperar la palabra.
+- Siempre contesta por voz, también cuando le escribes. Di o escribe **"modo texto"** para que conteste por escrito, y **"modo voz"** para volver.
+- Se apaga desde el aviso ("Dejar de escuchar") o en Ajustes → Voz.
+- En Samsung, para que Android no la cierre: Ajustes → Aplicaciones → Ultra Yo → Batería → **Sin restricciones**.
+
+La palabra "Ultra" se reconoce dentro del teléfono, sin enviar nada a internet.
+
 ### Enséñale
 
 Tu IA aprende lo que le digas y lo guarda en el teléfono:
@@ -54,5 +65,4 @@ La app se muestra encima de la pantalla de bloqueo y empieza a escuchar sola. Co
 
 ## Próximos pasos
 
-- Palabra de activación ("Jarvis") con la pantalla bloqueada, sin tocar nada.
 - Que pueda hacer cosas en el teléfono: alarmas, recordatorios, abrir apps.

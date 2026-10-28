@@ -2,17 +2,13 @@ package com.ultrayo.app
 
 import android.Manifest
 import android.app.KeyguardManager
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
@@ -58,6 +54,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -66,7 +64,6 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -93,9 +90,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.Locale
 
-private const val MAX_HISTORY = 20
 private const val MAX_FILE_TEXT = 6000
 private const val MAX_IMAGE_SIDE = 1024
 private val TEXT_EXTENSIONS = setOf(
@@ -103,30 +98,33 @@ private val TEXT_EXTENSIONS = setOf(
     "css", "yml", "yaml", "ini", "log", "gradle", "sh", "bat", "sql", "properties",
 )
 
-/** Lo que el usuario adjunta antes de enviar: una foto ya copiada al teléfono o el texto de un archivo. */
-private data class Attachment(val name: String, val imagePath: String? = null, val text: String? = null)
-
 class MainActivity : ComponentActivity() {
 
-    private lateinit var memory: Memory
     private lateinit var downloader: ModelDownloader
-    private var tts: TextToSpeech? = null
-    private var ttsReady = false
-    private var recognizer: SpeechRecognizer? = null
     private var downloadWatcher: Job? = null
 
-    private val turns = mutableStateListOf<Turn>()
-    private var status by mutableStateOf("")
-    private var listening by mutableStateOf(false)
-    private var thinking by mutableStateOf(false)
+    // El estado de la conversación vive en Assistant, compartido con el servicio que escucha "Ultra".
+    private val memory get() = Assistant.memory
+    private val turns get() = Assistant.turns
+    private var status: String
+        get() = Assistant.status
+        set(value) {
+            Assistant.status = value
+        }
+    private val listening get() = Assistant.listening
+    private val thinking get() = Assistant.thinking
+    private val brainReady get() = Assistant.brainReady
+    private var brainDirty: Boolean
+        get() = Assistant.brainDirty
+        set(value) {
+            Assistant.brainDirty = value
+        }
+
     private var locked by mutableStateOf(false)
     private var download by mutableStateOf<DownloadState>(DownloadState.None)
-    private var brainReady by mutableStateOf(Ai.brain != null)
     private var lastCrash by mutableStateOf<String?>(null)
     private var attachment by mutableStateOf<Attachment?>(null)
-
-    /** Hay que reiniciar la conversación del modelo (cambió la memoria o se borró el chat). */
-    private var brainDirty = true
+    private var wakeOn by mutableStateOf(false)
 
     private var folders by mutableStateOf<List<Uri>>(emptyList())
 
@@ -146,21 +144,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startListening() else status = "Necesito permiso para usar el micrófono"
+        if (granted) {
+            maybeStartWake()
+            listenNow()
+        } else {
+            status = "Necesito permiso para usar el micrófono"
+        }
+    }
+
+    // Sin este permiso el aviso de "te escucho" no se ve, pero la escucha funciona igual.
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        maybeStartWake()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        memory = Memory(this)
+        Assistant.init(this)
         lastCrash = App.crashFile(this).takeIf { it.exists() }?.readText()
         folders = Folders.list(this)
         downloader = ModelDownloader(this)
-        tts = TextToSpeech(this) { result ->
-            if (result == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.forLanguageTag("es-ES")
-                ttsReady = true
-            }
-        }
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -178,14 +180,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        wakeOn = UltraService.instance != null
+        if (brainReady) maybeStartWake()
         // Con el teléfono bloqueado (abierta con el botón lateral) empieza a escuchar sola.
-        if (locked && brainReady && hasMicPermission() && !listening && !thinking) startListening()
-    }
-
-    override fun onDestroy() {
-        recognizer?.destroy()
-        tts?.shutdown()
-        super.onDestroy()
+        if (locked && brainReady && hasMicPermission() && !listening && !thinking) listenNow()
     }
 
     private fun hasMicPermission() =
@@ -230,28 +228,59 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun loadBrain() {
-        if (Ai.brain != null) {
-            brainReady = true
+    private fun loadBrain() = Assistant.loadBrain { maybeStartWake() }
+
+    // --- Palabra "Ultra" ---
+
+    private var preparingWake = false
+
+    /** Enciende la escucha de "Ultra" en segundo plano si está activada. Solo se puede con la app abierta. */
+    private fun maybeStartWake() {
+        if (!memory.wakeWord || !brainReady || !hasMicPermission() || preparingWake) return
+        if (UltraService.instance != null) {
+            wakeOn = true
             return
         }
-        status = "Despertando a tu IA…"
-        lifecycleScope.launch {
-            try {
-                withContext(Ai.thread) {
-                    if (Ai.brain == null) {
-                        Ai.brain = Brain(
-                            downloader.file.path,
-                            cacheDir.path,
-                            listOf(PhoneTools(applicationContext), SelfTools(applicationContext)),
-                        ).also { it.load() }
-                    }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !getSharedPreferences("ultrayo", MODE_PRIVATE).getBoolean("asked_notifications", false)
+        ) {
+            getSharedPreferences("ultrayo", MODE_PRIVATE).edit().putBoolean("asked_notifications", true).apply()
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        if (!WakeModel.isReady(this)) {
+            preparingWake = true
+            status = "Preparando el oído para la palabra \"Ultra\" (40 MB, solo una vez)…"
+            lifecycleScope.launch {
+                try {
+                    WakeModel.download(this@MainActivity)
+                    status = ""
+                } catch (e: Exception) {
+                    status = "No pude descargar el oído: ${e.message}"
+                    return@launch
+                } finally {
+                    preparingWake = false
                 }
-                brainReady = true
-                status = ""
-            } catch (e: Exception) {
-                status = "No pude cargar el modelo: ${e.message}"
+                maybeStartWake()
             }
+            return
+        }
+        try {
+            UltraService.start(this)
+            wakeOn = true
+        } catch (e: Exception) {
+            status = "No pude empezar a escuchar \"Ultra\": ${e.message}"
+        }
+    }
+
+    private fun setWake(on: Boolean) {
+        memory.wakeWord = on
+        if (on) {
+            maybeStartWake()
+        } else {
+            UltraService.stop(this)
+            wakeOn = false
         }
     }
 
@@ -324,129 +353,30 @@ class MainActivity : ComponentActivity() {
 
     // --- Voz ---
 
-    private fun startListening() {
+    /** Toca el reactor: si estaba escuchando, termina; si no, empieza a conversar por voz. */
+    private fun listenNow() {
+        if (listening) {
+            Assistant.stopListening()
+            return
+        }
         if (!hasMicPermission()) {
             askMic.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            status = "Este teléfono no tiene reconocimiento de voz disponible"
-            return
-        }
-        tts?.stop()
-        val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
-        r.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {
-                listening = true
-                status = "Te escucho…"
-            }
-
-            override fun onResults(results: Bundle?) {
-                listening = false
-                status = ""
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (text.isNullOrBlank()) status = "No te entendí" else send(text)
-            }
-
-            override fun onError(error: Int) {
-                listening = false
-                status = when (error) {
-                    SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-                        "No te oí. Toca el reactor para hablar."
-                    else -> "Error del micrófono ($error)"
-                }
-            }
-
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onPartialResults(partialResults: Bundle?) {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
-        }
-        r.startListening(intent)
+        Assistant.stopSpeaking()
+        val service = UltraService.instance
+        if (service != null) service.wake() else Assistant.converse()
     }
 
-    private fun say(text: String, aloud: Boolean) {
-        turns.add(Turn("assistant", text))
-        status = ""
-        val spoken = text.replace(Regex("[*#_`>|]"), "")
-        if (aloud && ttsReady) tts?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "reply")
-    }
-
-    // --- Conversación ---
-
-    /** [aloud]: responder en voz alta (cuando se le habló) o solo por escrito (cuando se le escribió). */
-    private fun send(typed: String, aloud: Boolean = true) {
+    private fun sendTyped(text: String) {
         val attached = attachment
         attachment = null
-        val text = typed.ifBlank {
-            when {
-                attached?.imagePath != null -> "¿Qué ves en esta foto?"
-                attached != null -> "Resúmeme este archivo."
-                else -> return
-            }
-        }
-        val history = turns.takeLast(MAX_HISTORY)
-        turns.add(Turn("user", text, image = attached?.imagePath, fileName = attached?.name))
-
-        if (attached == null) {
-            ClaudeLink.questionIn(text)?.let { question ->
-                if (locked) {
-                    say("Desbloquea el teléfono y te paso a Claude.", aloud)
-                } else {
-                    say(ClaudeLink.open(this, question), aloud)
-                }
-                return
-            }
-            Teaching.handle(text, memory)?.let { answer ->
-                brainDirty = true
-                say(answer, aloud)
-                return
-            }
-        }
-
-        val brain = Ai.brain ?: return
-        if (attached?.imagePath != null && !brain.visionEnabled) {
-            say("Todavía no puedo ver fotos en este teléfono. Si quieres, descríbemela con palabras.", aloud)
-            return
-        }
-        val prompt = if (attached?.text != null) {
-            "$text\n\n[Archivo adjunto: ${attached.name}]\n${attached.text}"
-        } else {
-            text
-        }
-        thinking = true
-        status = "Pensando…"
-        val reset = brainDirty
-        brainDirty = false
-        val systemPrompt = memory.systemPrompt()
-        lifecycleScope.launch {
-            val reply = try {
-                withContext(Ai.thread) {
-                    if (reset) brain.reset(systemPrompt, history)
-                    brain.ask(prompt, attached?.imagePath)
-                }
-            } catch (e: Exception) {
-                brainDirty = true
-                status = "Algo falló: ${e.message}"
-                null
-            }
-            thinking = false
-            if (reply != null) say(reply.ifBlank { "No sé qué responder a eso." }, aloud)
-        }
+        Assistant.send(text, attached)
     }
 
     private fun newChat() {
-        turns.clear()
-        SelfEdits.pending.value = null
+        Assistant.newChat()
         attachment = null
-        brainDirty = true
-        status = ""
     }
 
     // --- Pantallas ---
@@ -489,6 +419,8 @@ class MainActivity : ComponentActivity() {
                     when {
                         listening -> "Escuchando"
                         thinking -> "Pensando"
+                        Assistant.speaking -> "Hablando"
+                        brainReady && wakeOn -> "Di \"Ultra\" para hablar"
                         brainReady -> "En línea · sin internet"
                         else -> "Preparándose"
                     },
@@ -604,13 +536,13 @@ class MainActivity : ComponentActivity() {
                         160.dp,
                         listening = listening,
                         thinking = thinking,
-                        modifier = Modifier.clickable { if (listening) recognizer?.stopListening() else startListening() },
+                        modifier = Modifier.clickable { listenNow() },
                     )
                     Spacer(Modifier.height(24.dp))
                     Text("¿En qué te ayudo, Maurizio?", color = UltraColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Light)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Toca el reactor para hablar, o escríbeme abajo.",
+                        if (wakeOn) "Di \"Ultra\" o toca el reactor para hablar. También puedes escribirme abajo." else "Toca el reactor para hablar, o escríbeme abajo.",
                         color = UltraColors.Muted,
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center,
@@ -714,7 +646,7 @@ class MainActivity : ComponentActivity() {
             if (typed.isNotBlank() || attachment != null) {
                 IconButton(
                     onClick = {
-                        send(typed.trim(), aloud = false)
+                        sendTyped(typed.trim())
                         typed = ""
                     },
                     enabled = !thinking,
@@ -734,7 +666,7 @@ class MainActivity : ComponentActivity() {
                         .alpha(if (thinking) 0.4f else 1f)
                         .clip(CircleShape)
                         .clickable(enabled = !thinking) {
-                            if (listening) recognizer?.stopListening() else startListening()
+                            listenNow()
                         },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -763,7 +695,27 @@ class MainActivity : ComponentActivity() {
             brainDirty = true
         }
 
+        var voiceReplies by remember { mutableStateOf(memory.voiceReplies) }
+
         LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item {
+                Card {
+                    SectionTitle("Voz")
+                    SettingSwitch(
+                        "Escuchar \"Ultra\" siempre",
+                        "Aunque la app esté cerrada o el teléfono bloqueado. Deja un aviso fijo mientras escucha.",
+                        wakeOn,
+                    ) { setWake(it) }
+                    SettingSwitch(
+                        "Contestar en voz alta",
+                        "Si lo apagas, contesta por escrito. También puedes decirle \"modo texto\" o \"modo voz\".",
+                        voiceReplies,
+                    ) {
+                        memory.voiceReplies = it
+                        voiceReplies = it
+                    }
+                }
+            }
             if (canUndo) {
                 item {
                     Card {
@@ -888,6 +840,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Composable
+    private fun SettingSwitch(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, color = UltraColors.Text, fontWeight = FontWeight.SemiBold)
+                Text(subtitle, color = UltraColors.Muted, fontSize = 13.sp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(
+                checked = checked,
+                onCheckedChange = onChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = UltraColors.Accent,
+                ),
+            )
+        }
+    }
+
     /** Tarjeta para aceptar o rechazar un cambio que la IA quiere hacerse a sí misma. */
     @Composable
     private fun SelfChangeCard(change: SelfChange) {
@@ -918,11 +889,11 @@ class MainActivity : ComponentActivity() {
                     change.apply(memory)
                     SelfEdits.pending.value = null
                     brainDirty = true
-                    say("Hecho: ${change.description.replaceFirstChar { it.lowercase() }}. Si no te gusta, dime \"deshaz el último cambio\".", aloud = false)
+                    Assistant.say("Hecho: ${change.description.replaceFirstChar { it.lowercase() }}. Si no te gusta, dime \"deshaz el último cambio\".")
                 })
                 TextButton(onClick = {
                     SelfEdits.pending.value = null
-                    say("Vale, lo dejo como estaba.", aloud = false)
+                    Assistant.say("Vale, lo dejo como estaba.")
                 }) { Text("No") }
             }
         }

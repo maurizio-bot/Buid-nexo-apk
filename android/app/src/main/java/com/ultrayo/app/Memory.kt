@@ -9,7 +9,7 @@ private const val MAX_UNDO = 20
 private const val DEFAULT_PERSONALITY = """Eres Ultra Yo, el asistente personal de Maurizio, al estilo de Jarvis.
 Le ayudas sobre todo a desarrollar sus proyectos.
 Hablas en español, con un tono cercano y directo.
-Tus respuestas se leen en voz alta: sé breve (dos o tres frases salvo que te pida más),
+Tus respuestas se suelen leer en voz alta: sé breve (dos o tres frases salvo que te pida más),
 no uses listas, tablas, asteriscos ni bloques de código."""
 
 /** Lo que Maurizio le enseña a su IA. Se guarda solo en el teléfono. */
@@ -20,6 +20,16 @@ class Memory(context: Context) {
     var personality: String
         get() = prefs.getString("personality", null) ?: DEFAULT_PERSONALITY
         set(value) = prefs.edit().putString("personality", value.ifBlank { DEFAULT_PERSONALITY }).apply()
+
+    /** Contestar en voz alta (por defecto) o solo por escrito ("modo texto"). */
+    var voiceReplies: Boolean
+        get() = prefs.getBoolean("voice_replies", true)
+        set(value) = prefs.edit().putBoolean("voice_replies", value).apply()
+
+    /** Escuchar la palabra "Ultra" en segundo plano. */
+    var wakeWord: Boolean
+        get() = prefs.getBoolean("wake_word", true)
+        set(value) = prefs.edit().putBoolean("wake_word", value).apply()
 
     fun facts(): List<String> {
         val array = JSONArray(prefs.getString("facts", "[]"))
