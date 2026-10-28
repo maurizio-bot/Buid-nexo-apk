@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.0"
+        versionCode = 6
+        versionName = "0.4.0"
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior
@@ -47,6 +47,7 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2025.05.01")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.core:core-ktx:1.16.0")

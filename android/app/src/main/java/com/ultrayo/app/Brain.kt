@@ -1,6 +1,7 @@
 package com.ultrayo.app
 
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
@@ -10,7 +11,8 @@ import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.ToolSet
 import com.google.ai.edge.litertlm.tool
 
-data class Turn(val role: String, val content: String)
+/** Un mensaje del chat. [image] es la ruta de una foto adjunta y [fileName] el nombre de un archivo adjunto. */
+data class Turn(val role: String, val content: String, val image: String? = null, val fileName: String? = null)
 
 /**
  * El modelo de IA que corre dentro del teléfono (Gemma con LiteRT-LM).
@@ -30,11 +32,25 @@ class Brain(
      * y evita cierres de la app si el controlador gráfico falla en código nativo.
      */
     fun load() {
-        engine = start(Backend.CPU())
+        engine = try {
+            start(vision = true).also { visionEnabled = true }
+        } catch (e: Exception) {
+            // Si la parte que ve imágenes no arranca, al menos que pueda hablar.
+            start(vision = false)
+        }
     }
 
-    private fun start(backend: Backend): Engine {
-        val engine = Engine(EngineConfig(modelPath = modelPath, backend = backend, cacheDir = cacheDir))
+    /** Si puede mirar fotos. */
+    var visionEnabled = false
+        private set
+
+    private fun start(vision: Boolean): Engine {
+        val config = if (vision) {
+            EngineConfig(modelPath = modelPath, backend = Backend.CPU(), visionBackend = Backend.CPU(), cacheDir = cacheDir)
+        } else {
+            EngineConfig(modelPath = modelPath, backend = Backend.CPU(), cacheDir = cacheDir)
+        }
+        val engine = Engine(config)
         try {
             engine.initialize()
         } catch (e: Exception) {
@@ -58,8 +74,15 @@ class Brain(
         )
     }
 
-    fun ask(text: String): String =
-        checkNotNull(conversation) { "No hay conversación" }.sendMessage(text).toString().trim()
+    fun ask(text: String, imagePath: String? = null): String {
+        val conversation = checkNotNull(conversation) { "No hay conversación" }
+        val reply = if (imagePath != null && visionEnabled) {
+            conversation.sendMessage(Contents.of(Content.ImageFile(imagePath), Content.Text(text)))
+        } else {
+            conversation.sendMessage(text)
+        }
+        return reply.toString().trim()
+    }
 
     fun close() {
         conversation?.close()

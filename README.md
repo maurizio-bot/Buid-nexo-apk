@@ -20,7 +20,9 @@ En **Memoria** puedes ver, añadir y borrar lo que sabe, y cambiar su **personal
 
 ### Escríbele
 
-Si no puedes hablar, escribe en la caja de abajo y pulsa **Enviar**. Cuando le escribes, responde solo por escrito.
+Si no puedes hablar, escribe en la barra de abajo y pulsa la flecha de enviar. Cuando le escribes, responde solo por escrito.
+
+Con el botón **+** puedes adjuntar una **foto** (te dice qué ve) o un **archivo de texto** (código, notas, .txt, .md, .json…). Solo los lee, nunca los cambia.
 
 ### Acceso al teléfono (solo lectura)
 
