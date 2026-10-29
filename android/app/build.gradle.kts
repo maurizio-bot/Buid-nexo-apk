@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.7.0"
+        versionCode = 10
+        versionName = "0.8.0"
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior
@@ -24,6 +24,14 @@ android {
             storePassword = "ultrayo"
             keyAlias = "ultrayo"
             keyPassword = "ultrayo"
+        }
+    }
+
+    // El motor de imágenes es un programa que se ejecuta aparte: Android solo deja ejecutarlo
+    // si se instala descomprimido en la carpeta de librerías nativas.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 

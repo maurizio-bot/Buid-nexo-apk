@@ -139,6 +139,10 @@ class MainActivity : ComponentActivity() {
         if (uri != null) attachPhoto(uri)
     }
 
+    private val pickPhotoToEdit = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) attachPhoto(uri, edit = true)
+    }
+
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) attachFile(uri)
     }
@@ -290,7 +294,7 @@ class MainActivity : ComponentActivity() {
         DocumentFile.fromSingleUri(this, uri)?.name ?: uri.lastPathSegment ?: "archivo"
 
     /** Copia la foto al teléfono, reducida, para que el modelo la pueda mirar sin gastar mucha memoria. */
-    private fun attachPhoto(uri: Uri) {
+    private fun attachPhoto(uri: Uri, edit: Boolean = false) {
         val name = displayName(uri)
         status = "Preparando la foto…"
         lifecycleScope.launch {
@@ -314,7 +318,7 @@ class MainActivity : ComponentActivity() {
                 return@launch
             }
             status = ""
-            attachment = Attachment(name, imagePath = path)
+            if (edit) Studio.editing = path else attachment = Attachment(name, imagePath = path)
         }
     }
 
@@ -392,6 +396,18 @@ class MainActivity : ComponentActivity() {
                 .imePadding()
                 .padding(horizontal = 16.dp)
         ) {
+            val editing = Studio.editing
+            if (editing != null && !locked) {
+                ImageEditor(
+                    editing,
+                    onClose = { Studio.editing = null },
+                    onSaved = { path ->
+                        Studio.editing = null
+                        turns.add(Turn("assistant", "Imagen editada. También está en tu galería.", image = path))
+                    },
+                )
+                return@Column
+            }
             Header(showMemory = showMemory, onToggleMemory = { showMemory = !showMemory })
             when {
                 lastCrash != null -> CrashScreen(lastCrash.orEmpty(), Modifier.weight(1f))
@@ -557,12 +573,17 @@ class MainActivity : ComponentActivity() {
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(turns) { Bubble(it) }
-                    if (thinking) item { ThinkingDots() }
+                    val preview = Studio.preview
+                    when {
+                        preview != null -> item { PaintingPreview(preview) }
+                        thinking -> item { ThinkingDots() }
+                    }
                 }
             }
 
-            if (status.isNotBlank()) {
-                Text(status, color = UltraColors.Muted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
+            val shownStatus = Studio.progress ?: status
+            if (shownStatus.isNotBlank()) {
+                Text(shownStatus, color = UltraColors.Muted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
             }
             SelfEdits.pending.value?.let { if (!locked) SelfChangeCard(it) }
             attachment?.let { AttachmentChip(it) }
@@ -614,6 +635,13 @@ class MainActivity : ComponentActivity() {
                         onClick = {
                             menuOpen = false
                             pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("🖌️  Editar una foto") },
+                        onClick = {
+                            menuOpen = false
+                            pickPhotoToEdit.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         },
                     )
                     DropdownMenuItem(
@@ -716,6 +744,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            item { PainterCard() }
             if (canUndo) {
                 item {
                     Card {
@@ -840,6 +869,58 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Estado del pintor (crear y editar imágenes con IA) y botón para descargarlo. */
+    @Composable
+    private fun PainterCard() {
+        var state by remember { mutableStateOf(Painter.state(this)) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(1000)
+                state = Painter.state(this@MainActivity)
+            }
+        }
+        val model = Painter.model(this)
+        Card {
+            SectionTitle(
+                "Imágenes",
+                "Dile \"crea una imagen de…\" o toca una imagen del chat para editarla. Pinta dentro del teléfono, sin internet.",
+            )
+            Text(
+                "Pintor: ${model.name} en la ${if (model.npu) "NPU (rápido)" else "GPU"}",
+                color = UltraColors.Text,
+                fontSize = 13.sp,
+            )
+            when (val s = state) {
+                PainterState.Ready -> Text("Listo para pintar.", color = UltraColors.Accent)
+                PainterState.None -> GlowButton(
+                    "Descargar el pintor (${model.sizeMb} MB)",
+                    onClick = {
+                        Painter.startDownload(this@MainActivity)
+                        state = Painter.state(this@MainActivity)
+                    },
+                    Modifier.fillMaxWidth(),
+                )
+                is PainterState.Downloading -> {
+                    Text("Descargando… ${(s.progress * 100).toInt()} %", color = UltraColors.Accent)
+                    LinearProgressIndicator(
+                        progress = { s.progress },
+                        color = UltraColors.AccentBright,
+                        trackColor = UltraColors.Glass,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape),
+                    )
+                }
+                PainterState.Unpacking -> Text("Preparando el modelo…", color = UltraColors.Accent)
+                is PainterState.Failed -> {
+                    Text("Falló: ${s.message}", color = UltraColors.Muted)
+                    GlowButton("Reintentar", onClick = { Painter.retry(this@MainActivity) }, Modifier.fillMaxWidth())
+                }
+            }
+        }
+    }
+
     @Composable
     private fun SettingSwitch(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -949,13 +1030,31 @@ class MainActivity : ComponentActivity() {
                 if (!mine) {
                     Text("ULTRA YO", color = UltraColors.Accent, fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
                 }
-                turn.image?.let { Thumbnail(it, 180.dp) }
+                turn.image?.let { path ->
+                    Box(Modifier.clickable(enabled = !locked && !thinking) { Studio.editing = path }) {
+                        Thumbnail(path, if (mine) 180.dp else 260.dp)
+                    }
+                }
                 if (turn.image == null && turn.fileName != null) {
                     Text("📄  ${turn.fileName}", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
                 }
                 Text(turn.content, color = UltraColors.Text, fontSize = 15.sp, lineHeight = 21.sp)
             }
         }
+    }
+
+    /** Lo que va saliendo mientras pinta. */
+    @Composable
+    private fun PaintingPreview(preview: Bitmap) {
+        Image(
+            preview.asImageBitmap(),
+            contentDescription = "Imagen pintándose",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(260.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .border(1.dp, UltraColors.GlassBorder, RoundedCornerShape(18.dp)),
+        )
     }
 
     @Composable
