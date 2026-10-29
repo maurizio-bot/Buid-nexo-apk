@@ -47,6 +47,21 @@ Si no puedes hablar, escribe en la barra de abajo y pulsa la flecha de enviar. C
 
 Con el botón **+** puedes adjuntar una **foto** (te dice qué ve) o un **archivo de texto** (código, notas, .txt, .md, .json…). Solo los lee, nunca los cambia.
 
+### Crea y edita imágenes
+
+Ultra Yo pinta dentro del teléfono con Stable Diffusion, sin internet ni coste. En el S24 Ultra usa la
+NPU del Snapdragon 8 Gen 3 (unos segundos por imagen); la primera vez descarga el pintor (~1 GB).
+
+- "Ultra, crea una imagen de un dragón sobre Madrid" (también "dibújame…", "hazme un logo de…").
+- Sobre la última imagen o una foto adjunta: "ponla en blanco y negro", "gírala", "recórtala",
+  "ponle el texto Feliz cumpleaños", "hazla más clara", o cambios con IA: "conviértela en estilo anime".
+- Toca cualquier imagen del chat (o + → Editar una foto) para abrir el editor: recortar, girar, espejo,
+  brillo/contraste/saturación, filtros, texto y "Con IA".
+- Todo se guarda también en la galería, en Imágenes/Ultra Yo.
+
+El motor es el de [Local Dream](https://github.com/xororz/local-dream) (CC BY-NC 4.0, uso personal) con
+las librerías QNN de Qualcomm; `android/scripts/motor-imagenes.sh` los descarga al compilar.
+
 ### Pregúntale a Claude
 
 Di o escribe "pregúntale a Claude …" y Ultra Yo abre la app de Claude (o claude.ai si no la tienes) con la pregunta ya escrita. Es gratis: usa tu cuenta normal, sin API ni clave. La respuesta la ves tú en la app de Claude.

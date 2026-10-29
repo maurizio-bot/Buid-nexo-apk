@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -194,9 +195,9 @@ object Assistant {
         )
     }
 
-    /** Añade la respuesta al chat y la dice en voz alta, salvo en modo texto. [onDone] se llama al terminar. */
-    fun say(text: String, onDone: (() -> Unit)? = null) {
-        turns.add(Turn("assistant", text))
+    /** Añade la respuesta al chat (con una [image] opcional) y la dice en voz alta, salvo en modo texto. [onDone] se llama al terminar. */
+    fun say(text: String, onDone: (() -> Unit)? = null, image: String? = null) {
+        turns.add(Turn("assistant", text, image = image))
         status = ""
         if (!memory.voiceReplies || !ttsReady) {
             onDone?.invoke()
@@ -263,6 +264,14 @@ object Assistant {
             }
         }
 
+        if (attached == null || attached.imagePath != null) {
+            val target = attached?.imagePath ?: recentImage(history)
+            ImageCommands.parse(text, target != null)?.let { command ->
+                image(command, target, onDone)
+                return
+            }
+        }
+
         val brain = Ai.brain
         if (brain == null) {
             say("Todavía me estoy despertando. Dame un momento.", onDone)
@@ -294,6 +303,64 @@ object Assistant {
             }
             thinking = false
             say(reply.ifBlank { "No sé qué responder a eso." }, onDone)
+        }
+    }
+
+    // --- Imágenes ---
+
+    /** La imagen del último intercambio del chat: a esa se refieren "gírala" o "ponla en blanco y negro". */
+    private fun recentImage(history: List<Turn>): String? =
+        history.takeLast(2).lastOrNull { it.image != null }?.image?.takeIf { java.io.File(it).exists() }
+
+    private fun image(command: ImageCommand, target: String?, onDone: (() -> Unit)?) {
+        when (command) {
+            is ImageCommand.Create -> {
+                Studio.notReadyMessage(app)?.let { return say(it, onDone) }
+                paint(onDone) {
+                    val path = Studio.create(app, command.description)
+                    "Aquí la tienes. También está en tu galería, en la carpeta Ultra Yo." to path
+                }
+            }
+            is ImageCommand.AiEdit -> {
+                val path = checkNotNull(target)
+                Studio.notReadyMessage(app)?.let { return say(it, onDone) }
+                paint(onDone) {
+                    val source = withContext(Dispatchers.IO) { ImageOps.load(path) } ?: error("no pude abrir la imagen")
+                    val edited = Studio.aiEdit(app, source, command.instruction, sourcePath = path)
+                    "Hecho. La nueva versión también está en tu galería." to withContext(Dispatchers.IO) { Studio.keep(app, edited) }
+                }
+            }
+            is ImageCommand.Basic -> scope.launch {
+                val path = try {
+                    withContext(Dispatchers.Default) {
+                        val source = ImageOps.load(checkNotNull(target)) ?: error("no pude abrir la imagen")
+                        Studio.keep(app, command.apply(source))
+                    }
+                } catch (e: Exception) {
+                    return@launch say("No pude retocarla: ${e.message}", onDone)
+                }
+                say(command.done, onDone, image = path)
+            }
+            ImageCommand.OpenEditor -> {
+                if (locked()) return say("Desbloquea el teléfono y te abro el editor.", onDone)
+                Studio.editing = target
+                say("Te abro el editor.", onDone)
+            }
+        }
+    }
+
+    /** Pinta con el pintor local y enseña el resultado. [work] devuelve qué decir y la ruta de la imagen. */
+    private fun paint(onDone: (() -> Unit)?, work: suspend () -> Pair<String, String>) {
+        thinking = true
+        scope.launch {
+            val result = try {
+                work()
+            } catch (e: Exception) {
+                thinking = false
+                return@launch say("No pude pintarla: ${e.message}", onDone)
+            }
+            thinking = false
+            say(result.first, onDone, image = result.second)
         }
     }
 

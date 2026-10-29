@@ -84,6 +84,27 @@ class Brain(
         return reply.toString().trim()
     }
 
+    /**
+     * Una petición suelta, fuera del chat (por ejemplo, traducir lo que hay que pintar).
+     * Cierra la conversación en curso: después hay que llamar a [reset].
+     */
+    fun answerOnce(instruction: String, text: String, imagePath: String? = null): String {
+        conversation?.close()
+        conversation = null
+        val once = checkNotNull(engine) { "El modelo no está cargado" }
+            .createConversation(ConversationConfig(systemInstruction = Contents.of(instruction)))
+        return try {
+            val reply = if (imagePath != null && visionEnabled) {
+                once.sendMessage(Contents.of(Content.ImageFile(imagePath), Content.Text(text)))
+            } else {
+                once.sendMessage(text)
+            }
+            reply.toString().trim()
+        } finally {
+            once.close()
+        }
+    }
+
     fun close() {
         conversation?.close()
         engine?.close()

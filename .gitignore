@@ -1,2 +1,6 @@
 __pycache__/
 .pytest_cache/
+
+# Motor de imágenes: lo descarga android/scripts/motor-imagenes.sh
+android/app/src/main/jniLibs/
+android/app/src/main/assets/qnn/
