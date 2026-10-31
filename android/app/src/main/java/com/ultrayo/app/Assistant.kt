@@ -276,6 +276,11 @@ object Assistant {
                 say(if (locked()) "Desbloquea el teléfono y te paso a Claude." else ClaudeLink.open(app, question), onDone)
                 return
             }
+            // Llamadas a herramientas pegadas o escritas a mano, y "crea una habilidad llamada X: …"
+            (WrittenCalls.handle(app, text)?.done?.joinToString(" ") ?: WrittenCalls.skillCommand(app, text))?.let { answer ->
+                say(answer, onDone)
+                return
+            }
             Teaching.handle(text, memory)?.let { answer ->
                 brainDirty = true
                 say(answer, onDone)
@@ -360,7 +365,10 @@ object Assistant {
                 }
             }
             thinking = false
-            say(reply.ifBlank { "No sé qué responder a eso." }, onDone)
+            // Si el modelo escribió la herramienta como texto en vez de usarla, se hace por él.
+            val written = WrittenCalls.handle(app, reply)
+            val shown = if (written != null) (written.remainingText + "\n\n" + written.done.joinToString(" ")).trim() else reply
+            say(shown.ifBlank { "No sé qué responder a eso." }, onDone)
         }
     }
 
