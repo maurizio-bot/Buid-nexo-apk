@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.9.1"
+        versionCode = 13
+        versionName = "0.10.0"
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior
@@ -70,4 +70,6 @@ dependencies {
     implementation("org.mozilla:rhino:1.7.15")
     // Leer el texto de los PDF
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // Leer el texto de las fotos sin internet (el modelo va dentro de la app)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }

@@ -58,15 +58,13 @@ class PhoneTools(context: Context) : ToolSet {
         )
     }
 
-    @Tool(description = "Lee el texto de un documento (txt, pdf, doc, docx, xlsx, pptx, odt, rtf, epub, html…) usando la ruta que devolvió buscarArchivos.")
+    @Tool(description = "Lee el texto de un documento (txt, pdf, doc, docx, xlsx, pptx, odt, rtf, epub, html…) o el texto escrito en una foto o captura, usando la ruta que devolvió buscarArchivos.")
     fun leerArchivo(
         @ToolParam(description = "Ruta del archivo, tal como la devolvió buscarArchivos") ruta: String,
     ): String {
         if (locked()) return LOCKED
         val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo. Búscalo primero con buscarArchivos."
-        if (file.kind == "foto" || file.kind == "vídeo") {
-            return "Es ${if (file.kind == "foto") "una foto" else "un vídeo"}: usa mostrarEnPantalla para enseñárselo a Maurizio."
-        }
+        if (file.kind == "vídeo") return "Es un vídeo: usa mostrarEnPantalla para enseñárselo a Maurizio o abrirArchivo para verlo."
         return try {
             DeviceFiles.readText(context, file)
         } catch (e: Exception) {

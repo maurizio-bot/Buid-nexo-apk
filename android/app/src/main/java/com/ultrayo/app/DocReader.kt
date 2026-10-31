@@ -27,16 +27,20 @@ object DocReader {
     private val OTHER = setOf("pdf", "doc", "rtf", "html", "htm")
 
     /** Formatos que sabe leer, para decírselo a Maurizio. */
-    const val FORMATS = "txt, pdf, doc, docx, xlsx, pptx, odt, rtf, epub, html, csv, json y código"
+    const val FORMATS = "txt, pdf (también escaneados), doc, docx, xlsx, pptx, odt, rtf, epub, html, csv, json, código y el texto de las fotos"
 
     fun canRead(name: String, mime: String? = null): Boolean {
         val ext = extension(name)
-        return ext in TEXT || ext in ZIPPED || ext in OTHER || mime.orEmpty().startsWith("text/")
+        return ext in TEXT || ext in ZIPPED || ext in OTHER || ext in Ocr.IMAGES ||
+            mime.orEmpty().startsWith("text/") || mime.orEmpty().startsWith("image/")
     }
 
     /** El texto de [uri], recortado a [limit] caracteres. Lanza una excepción si no puede leerlo. */
     fun read(context: Context, uri: Uri, name: String, mime: String? = null, limit: Int = MAX_DOC_TEXT): String {
         val ext = extension(name)
+        if (ext in Ocr.IMAGES || mime.orEmpty().startsWith("image/")) {
+            return finish(Ocr.read(context, uri), limit, "no veo ningún texto en esa imagen")
+        }
         val text = context.contentResolver.openInputStream(uri)?.use { stream ->
             when {
                 ext == "pdf" -> pdf(context, stream, limit)
@@ -52,8 +56,14 @@ object DocReader {
                 else -> error("no sé leer archivos .$ext (sé leer $FORMATS)")
             }
         } ?: error("no pude abrir el archivo")
+        // Un PDF escaneado no lleva texto dentro: se lee mirando sus páginas.
+        if (ext == "pdf" && text.isBlank()) return finish(Ocr.readPdf(context, uri, limit), limit, "no veo texto en ese PDF")
+        return finish(text, limit, "el archivo no tiene texto que pueda leer")
+    }
+
+    private fun finish(text: String, limit: Int, empty: String): String {
         val clean = text.replace(Regex("[ \\t]+"), " ").replace(Regex("\\n{3,}"), "\n\n").trim()
-        if (clean.isEmpty()) error("el archivo no tiene texto que pueda leer (quizá es una imagen escaneada)")
+        if (clean.isEmpty()) error(empty)
         return if (clean.length > limit) clean.take(limit) + "\n[…archivo recortado…]" else clean
     }
 

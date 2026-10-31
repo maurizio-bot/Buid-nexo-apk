@@ -59,6 +59,10 @@ object Assistant {
         "program|c[oó]digo|script|javascript|funci[oó]n|habilidad",
         RegexOption.IGNORE_CASE,
     )
+    private val readTextRequest = Regex(
+        "(lee|l[eé]eme|extrae|saca|copia)[^.?]*\\b(texto|pone|dice|escrito|letras)|qu[eé] (pone|dice|est[aá] escrito)|transcr[ií]be|p[aá]sa(la|me)? a texto|\\bocr\\b",
+        RegexOption.IGNORE_CASE,
+    )
     private val runSkill = Regex(
         "^(?:ejecuta|usa|lanza|corre) (?:la )?habilidad (?:programada )?(.+?)(?: con (.+))?$",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
@@ -304,6 +308,10 @@ object Assistant {
 
         if (attached == null || attached.imagePath != null) {
             val target = attached?.imagePath ?: recentImage(history)
+            if (target != null && readTextRequest.containsMatchIn(text)) {
+                readText(target, onDone)
+                return
+            }
             ImageCommands.parse(text, target != null)?.let { command ->
                 image(command, target, onDone)
                 return
@@ -341,6 +349,22 @@ object Assistant {
             }
             thinking = false
             say(reply.ifBlank { "No sé qué responder a eso." }, onDone)
+        }
+    }
+
+    /** Lee el texto escrito en una foto, dentro del teléfono, y lo pone en el chat. */
+    private fun readText(imagePath: String, onDone: (() -> Unit)?) {
+        thinking = true
+        status = "Leyendo el texto de la imagen…"
+        scope.launch {
+            val text = try {
+                withContext(Dispatchers.Default) { Ocr.read(imagePath).trim() }
+            } catch (e: Exception) {
+                thinking = false
+                return@launch say("No pude leer la imagen: ${e.message}", onDone)
+            }
+            thinking = false
+            say(if (text.isEmpty()) "No veo ningún texto en esa imagen." else "Esto es lo que pone:\n\n$text", onDone)
         }
     }
 
