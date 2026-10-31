@@ -336,6 +336,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         val name = displayName(uri)
+        if (Archives.isArchive(name)) {
+            attachArchive(uri, name)
+            return
+        }
         if (!DocReader.canRead(name, type) && !type.contains("json") && !type.contains("xml")) {
             status = "No sé leer \"$name\". Sé leer fotos y ${DocReader.FORMATS}."
             return
@@ -350,6 +354,21 @@ class MainActivity : ComponentActivity() {
             }
             status = ""
             attachment = Attachment(name, text = text)
+        }
+    }
+
+    /** Un comprimido adjunto se descomprime en la carpeta de Ultra Yo y la IA recibe la lista de lo que había. */
+    private fun attachArchive(uri: Uri, name: String) {
+        status = "Descomprimiendo \"$name\"…"
+        lifecycleScope.launch {
+            val summary = try {
+                withContext(Dispatchers.IO) { Archives.extract(this@MainActivity, uri, name).second }
+            } catch (e: Exception) {
+                status = "No pude descomprimir \"$name\": ${e.message}"
+                return@launch
+            }
+            status = ""
+            attachment = Attachment(name, text = summary)
         }
     }
 

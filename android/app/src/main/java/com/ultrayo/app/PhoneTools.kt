@@ -72,6 +72,32 @@ class PhoneTools(context: Context) : ToolSet {
         }
     }
 
+    @Tool(description = "Mira qué hay dentro de un archivo comprimido (zip, 7z, tar, gz…) sin descomprimirlo, usando la ruta que devolvió buscarArchivos.")
+    fun verComprimido(
+        @ToolParam(description = "Ruta del comprimido, tal como la devolvió buscarArchivos") ruta: String,
+    ): String {
+        if (locked()) return LOCKED
+        val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo."
+        return try {
+            Archives.describe(context, file.uri, file.name)
+        } catch (e: Exception) {
+            "No pude abrirlo: ${e.message}"
+        }
+    }
+
+    @Tool(description = "Descomprime un archivo comprimido (zip, 7z, tar, gz…) en tu carpeta, usando la ruta que devolvió buscarArchivos. Después puedes leer lo extraído con leerArchivo.")
+    fun descomprimir(
+        @ToolParam(description = "Ruta del comprimido, tal como la devolvió buscarArchivos") ruta: String,
+    ): String {
+        if (locked()) return LOCKED
+        val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo."
+        return try {
+            Archives.extract(context, file.uri, file.name).second
+        } catch (e: Exception) {
+            "No pude descomprimirlo: ${e.message}"
+        }
+    }
+
     @Tool(description = "Enseña en el chat una foto (o un fotograma de un vídeo) usando la ruta que devolvió buscarArchivos. Después Maurizio puede preguntarte por ella.")
     fun mostrarEnPantalla(
         @ToolParam(description = "Ruta de la foto o del vídeo, tal como la devolvió buscarArchivos") ruta: String,

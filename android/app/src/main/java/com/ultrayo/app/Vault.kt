@@ -72,7 +72,7 @@ object Vault {
 
     /** Los archivos de la carpeta (sin la memoria ni la base de datos), los más nuevos primero. */
     fun listFiles(context: Context): List<File> =
-        files(context).walkTopDown().maxDepth(4).filter { it.isFile && !it.name.startsWith(".") }
+        files(context).walkTopDown().maxDepth(10).filter { it.isFile && !it.name.startsWith(".") }
             .sortedByDescending { it.lastModified() }.toList()
 }
 

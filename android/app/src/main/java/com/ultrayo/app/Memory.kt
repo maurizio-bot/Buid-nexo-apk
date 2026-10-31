@@ -138,7 +138,8 @@ class Memory(context: Context) {
                 "cambiar ni borrar nada. Úsalas solo cuando te lo pida." +
                 "\n\nTu carpeta de almacenamiento es $folder: ahí está tu memoria, tu base de datos y los archivos que " +
                 "Maurizio te pide guardar. Cuando te pida guardar, apuntar o registrar algo, usa guardarDato; si es un " +
-                "archivo, guardarArchivo. Cuando te pida revisar tu memoria o buscar algo guardado, usa revisarMemoria." +
+                "archivo, guardarArchivo. Si te pide descomprimir algo, usa descomprimir (lo extrae en tu carpeta) y luego " +
+                "leerArchivo para leer y analizar lo que había dentro. Cuando te pida revisar tu memoria o buscar algo guardado, usa revisarMemoria." +
                 "\n\nSi Maurizio te pide que cambies tu forma de ser, tus reglas o tus habilidades, usa las " +
                 "herramientas proponer… para cambiarte o borrarte a ti mismo. Maurizio confirma cada cambio en la " +
                 "pantalla, así que dile que lo revise. No las uses si él no te lo ha pedido."

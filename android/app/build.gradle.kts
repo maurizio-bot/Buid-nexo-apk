@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.10.0"
+        versionCode = 14
+        versionName = "0.11.0"
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior
@@ -32,6 +32,9 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+        }
+        resources {
+            excludes += setOf("META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/DEPENDENCIES")
         }
     }
 
@@ -72,4 +75,7 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     // Leer el texto de las fotos sin internet (el modelo va dentro de la app)
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Descomprimir zip, 7z, tar, gz, bz2 y xz
+    implementation("org.apache.commons:commons-compress:1.26.2")
+    implementation("org.tukaani:xz:1.9")
 }
