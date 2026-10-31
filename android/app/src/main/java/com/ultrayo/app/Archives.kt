@@ -23,7 +23,7 @@ object Archives {
 
     private const val MAX_ENTRIES = 5000
     private const val MAX_TOTAL = 2L shl 30 // 2 GB descomprimidos como mucho
-    private const val MAX_LISTED = 40
+    private const val MAX_LISTED = 25
 
     private val SUFFIXES = listOf(
         ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tbz", ".tar.xz", ".txz",

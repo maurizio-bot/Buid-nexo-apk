@@ -66,7 +66,8 @@ class PhoneTools(context: Context) : ToolSet {
         val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo. Búscalo primero con buscarArchivos."
         if (file.kind == "vídeo") return "Es un vídeo: usa mostrarEnPantalla para enseñárselo a Maurizio o abrirArchivo para verlo."
         return try {
-            DeviceFiles.readText(context, file)
+            // Lo justo para que quepa en la conversación junto con lo ya hablado.
+            DeviceFiles.readText(context, file, limit = 3500)
         } catch (e: Exception) {
             "No pude leerlo: ${e.message}"
         }

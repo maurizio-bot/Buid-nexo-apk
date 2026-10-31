@@ -9,6 +9,7 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
@@ -21,7 +22,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1182,9 +1185,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
     private fun Bubble(turn: Turn) {
         val mine = turn.role == "user"
+        val clipboard = LocalClipboardManager.current
+        fun copy() {
+            clipboard.setText(AnnotatedString(turn.content))
+            Toast.makeText(this, "Mensaje copiado", Toast.LENGTH_SHORT).show()
+        }
         Box(Modifier.fillMaxWidth(), contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
             val shape = if (mine) RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp) else RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
             Column(
@@ -1200,11 +1209,32 @@ class MainActivity : ComponentActivity() {
                                 .border(1.dp, UltraColors.GlassBorder, shape)
                         }
                     )
+                    // Mantener pulsado un mensaje lo copia.
+                    .combinedClickable(onClick = {}, onLongClick = { copy() })
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 if (!mine) {
-                    Text("ULTRA YO", color = UltraColors.Accent, fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "ULTRA YO",
+                            color = UltraColors.Accent,
+                            fontSize = 10.sp,
+                            letterSpacing = 2.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "COPIAR",
+                            color = UltraColors.Muted,
+                            fontSize = 10.sp,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { copy() }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
                 }
                 turn.image?.let { path ->
                     Box(Modifier.clickable(enabled = !locked && !thinking) { Studio.editing = path }) {

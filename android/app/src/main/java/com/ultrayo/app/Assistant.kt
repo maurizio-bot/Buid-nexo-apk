@@ -22,6 +22,7 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 private const val MAX_HISTORY = 20
+private const val MAX_PROMPT = 6000
 
 /** Lo que el usuario adjunta antes de enviar: una foto ya copiada al teléfono o el texto de un archivo. */
 data class Attachment(val name: String, val imagePath: String? = null, val text: String? = null)
@@ -340,12 +341,23 @@ object Assistant {
         scope.launch {
             val reply = try {
                 withContext(Ai.thread) {
-                    if (reset) brain.reset(systemPrompt, history)
-                    brain.ask(prompt, attached?.imagePath)
+                    try {
+                        if (reset) brain.reset(systemPrompt, history)
+                        brain.ask(prompt, attached?.imagePath)
+                    } catch (e: Exception) {
+                        if (!Brain.isFull(e)) throw e
+                        // La conversación ya no cabe: empieza de cero (la memoria se conserva) y lo intenta otra vez.
+                        brain.reset(systemPrompt, emptyList())
+                        brain.ask(prompt.take(MAX_PROMPT), attached?.imagePath)
+                    }
                 }
             } catch (e: Exception) {
                 brainDirty = true
-                "Algo falló: ${e.message}"
+                if (Brain.isFull(e)) {
+                    "Eso es demasiado largo para leerlo de una vez. Pídeme una parte concreta, por ejemplo un archivo de dentro."
+                } else {
+                    "Algo falló: ${e.message}"
+                }
             }
             thinking = false
             say(reply.ifBlank { "No sé qué responder a eso." }, onDone)

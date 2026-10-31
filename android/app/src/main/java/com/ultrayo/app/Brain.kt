@@ -44,12 +44,25 @@ class Brain(
     var visionEnabled = false
         private set
 
-    private fun start(vision: Boolean): Engine {
-        val config = if (vision) {
-            EngineConfig(modelPath = modelPath, backend = Backend.CPU(), visionBackend = Backend.CPU(), cacheDir = cacheDir)
-        } else {
-            EngineConfig(modelPath = modelPath, backend = Backend.CPU(), cacheDir = cacheDir)
+    /**
+     * Arranca el motor con espacio para [MAX_TOKENS] tokens de conversación (archivos largos,
+     * resultados de herramientas…). Si el modelo no lo admite, con lo que traiga por defecto.
+     */
+    private fun start(vision: Boolean): Engine =
+        try {
+            start(vision, MAX_TOKENS)
+        } catch (e: Exception) {
+            start(vision, null)
         }
+
+    private fun start(vision: Boolean, maxTokens: Int?): Engine {
+        val config = EngineConfig(
+            modelPath = modelPath,
+            backend = Backend.CPU(),
+            visionBackend = if (vision) Backend.CPU() else null,
+            maxNumTokens = maxTokens,
+            cacheDir = cacheDir,
+        )
         val engine = Engine(config)
         try {
             engine.initialize()
@@ -102,6 +115,16 @@ class Brain(
             reply.toString().trim()
         } finally {
             once.close()
+        }
+    }
+
+    companion object {
+        const val MAX_TOKENS = 8192
+
+        /** Si el error es que la conversación ya no cabe en la memoria del modelo. */
+        fun isFull(e: Throwable): Boolean {
+            val message = e.message.orEmpty()
+            return message.contains("exceeds", ignoreCase = true) || message.contains("capacity", ignoreCase = true)
         }
     }
 
