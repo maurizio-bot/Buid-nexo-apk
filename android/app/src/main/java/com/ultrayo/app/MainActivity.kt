@@ -30,15 +30,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -77,6 +80,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -91,12 +95,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private const val MAX_FILE_TEXT = 6000
 private const val MAX_IMAGE_SIDE = 1024
-private val TEXT_EXTENSIONS = setOf(
-    "txt", "md", "csv", "json", "xml", "html", "htm", "kt", "kts", "java", "py", "js", "ts", "c", "cpp", "h",
-    "css", "yml", "yaml", "ini", "log", "gradle", "sh", "bat", "sql", "properties",
-)
 
 class MainActivity : ComponentActivity() {
 
@@ -127,6 +126,11 @@ class MainActivity : ComponentActivity() {
     private var wakeOn by mutableStateOf(false)
 
     private var folders by mutableStateOf<List<Uri>>(emptyList())
+    private var mediaAccess by mutableStateOf(false)
+
+    private val askMedia = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        mediaAccess = DeviceFiles.hasMedia(this)
+    }
 
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -166,6 +170,7 @@ class MainActivity : ComponentActivity() {
         Assistant.init(this)
         lastCrash = App.crashFile(this).takeIf { it.exists() }?.readText()
         folders = Folders.list(this)
+        mediaAccess = DeviceFiles.hasMedia(this)
         downloader = ModelDownloader(this)
         setContent {
             MaterialTheme(
@@ -185,6 +190,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
         wakeOn = UltraService.instance != null
+        mediaAccess = DeviceFiles.hasMedia(this)
         if (brainReady) maybeStartWake()
         // Con el teléfono bloqueado (abierta con el botón lateral) empieza a escuchar sola.
         if (locked && brainReady && hasMicPermission() && !listening && !thinking) listenNow()
@@ -322,7 +328,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Lee un archivo de texto (solo lectura). Las imágenes elegidas como archivo se tratan como fotos. */
+    /** Lee el texto de un documento (solo lectura). Las imágenes elegidas como archivo se tratan como fotos. */
     private fun attachFile(uri: Uri) {
         val type = contentResolver.getType(uri).orEmpty()
         if (type.startsWith("image/")) {
@@ -330,22 +336,14 @@ class MainActivity : ComponentActivity() {
             return
         }
         val name = displayName(uri)
-        val extension = name.substringAfterLast('.', "").lowercase()
-        val isText = type.startsWith("text/") || type.contains("json") || type.contains("xml") ||
-            extension in TEXT_EXTENSIONS
-        if (!isText) {
-            status = "Por ahora solo puedo leer fotos y archivos de texto, no \"$name\"."
+        if (!DocReader.canRead(name, type) && !type.contains("json") && !type.contains("xml")) {
+            status = "No sé leer \"$name\". Sé leer fotos y ${DocReader.FORMATS}."
             return
         }
+        status = "Leyendo \"$name\"…"
         lifecycleScope.launch {
             val text = try {
-                withContext(Dispatchers.IO) {
-                    contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
-                        val buffer = CharArray(MAX_FILE_TEXT)
-                        val read = reader.read(buffer)
-                        if (read <= 0) "" else String(buffer, 0, read)
-                    }.orEmpty()
-                }
+                withContext(Dispatchers.IO) { DocReader.read(this@MainActivity, uri, name, type) }
             } catch (e: Exception) {
                 status = "No pude leer \"$name\": ${e.message}"
                 return@launch
@@ -714,11 +712,13 @@ class MainActivity : ComponentActivity() {
         var skills by remember(version) { mutableStateOf(memory.skills()) }
         var skillName by remember { mutableStateOf("") }
         var skillText by remember { mutableStateOf("") }
+        var codeSkills by remember(version) { mutableStateOf(memory.codeSkills()) }
         var canUndo by remember(version) { mutableStateOf(memory.canUndo()) }
 
         fun changed() {
             facts = memory.facts()
             skills = memory.skills()
+            codeSkills = memory.codeSkills()
             canUndo = memory.canUndo()
             brainDirty = true
         }
@@ -759,7 +759,24 @@ class MainActivity : ComponentActivity() {
             }
             item {
                 Card {
-                    SectionTitle("Carpetas que puede leer", "Solo lectura: puede buscar y leer archivos, nunca cambiarlos ni borrarlos.")
+                    SectionTitle(
+                        "Archivos que puede leer",
+                        "Solo lectura: puede buscar fotos, vídeos, audios y documentos y leerlos (${DocReader.FORMATS}), nunca cambiarlos ni borrarlos.",
+                    )
+                    if (mediaAccess) {
+                        Text("🖼  Fotos, vídeos y audio de la galería", color = UltraColors.Text)
+                    } else {
+                        GlowButton(
+                            "Dejarle ver fotos, vídeos y audio",
+                            onClick = { askMedia.launch(DeviceFiles.mediaPermissions()) },
+                            Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Text(
+                        "Para documentos y descargas, dale acceso a una carpeta (por ejemplo Download o Documents).",
+                        color = UltraColors.Muted,
+                        fontSize = 13.sp,
+                    )
                     folders.forEach { uri ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("📁  " + Folders.name(this@MainActivity, uri), color = UltraColors.Text, modifier = Modifier.weight(1f))
@@ -771,6 +788,10 @@ class MainActivity : ComponentActivity() {
                     }
                     GlowButton("Dar acceso a una carpeta", onClick = { pickFolder.launch(null) }, Modifier.fillMaxWidth())
                 }
+            }
+            item { DataCard() }
+            item {
+                CodeSkillsCard(codeSkills) { changed() }
             }
             item {
                 Card {
@@ -869,6 +890,131 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Lo guardado en la base de datos del teléfono, por colecciones. */
+    @Composable
+    private fun DataCard() {
+        val store = remember { DataStore.get(this) }
+        var version by remember { mutableStateOf(0) }
+        var collections by remember(version) { mutableStateOf(store.collections()) }
+        var open by remember { mutableStateOf<String?>(null) }
+        val items = remember(version, open) { open?.let { store.search("", it, 100) }.orEmpty() }
+        Card {
+            SectionTitle(
+                "Datos guardados",
+                "Dile \"guarda en gastos: 12 € comida\" o \"guarda que…\", y pregúntale \"¿qué tengo guardado de gastos?\". Se guardan en el teléfono.",
+            )
+            if (collections.isEmpty()) Text("Todavía no hay nada guardado.", color = UltraColors.Muted, fontSize = 13.sp)
+            collections.forEach { (name, count) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "🗂  $name ($count)",
+                        color = UltraColors.Accent,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { open = if (open == name) null else name },
+                    )
+                    TextButton(onClick = { open = if (open == name) null else name }) { Text(if (open == name) "Cerrar" else "Ver") }
+                }
+                if (open == name) {
+                    items.forEach { d ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("#${d.id}  ${d.text}", color = UltraColors.Text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            TextButton(onClick = {
+                                store.delete(d.id)
+                                version++
+                                collections = store.collections()
+                            }) { Text("Borrar") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Habilidades con código: la parte de Ultra Yo que se puede programar sin tocar la app. */
+    @Composable
+    private fun CodeSkillsCard(skills: Map<String, CodeSkill>, onChanged: () -> Unit) {
+        var editing by remember { mutableStateOf<String?>(null) }
+        var name by remember { mutableStateOf("") }
+        var description by remember { mutableStateOf("") }
+        var code by remember { mutableStateOf("") }
+        var problem by remember { mutableStateOf<String?>(null) }
+        var output by remember { mutableStateOf<String?>(null) }
+
+        fun edit(skillName: String?) {
+            editing = skillName ?: ""
+            val skill = skillName?.let { skills[it] }
+            name = skillName ?: ""
+            description = skill?.description ?: ""
+            code = skill?.code ?: CODE_SKILL_TEMPLATE
+            problem = null
+            output = null
+        }
+
+        Card {
+            SectionTitle(
+                "Habilidades programadas",
+                "Código JavaScript que Ultra Yo ejecuta en su motor de habilidades. Solo lo escribe si tú se lo pides " +
+                    "(\"prográmate una habilidad que…\") y no se instala hasta que pulsas Aplicar. Al instalarla se reinicia el motor.",
+            )
+            skills.forEach { (skillName, skill) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("🧩  $skillName", color = UltraColors.Accent, fontWeight = FontWeight.SemiBold)
+                        Text(skill.description, color = UltraColors.Text, fontSize = 13.sp)
+                    }
+                    TextButton(onClick = { edit(skillName) }) { Text("Editar") }
+                    TextButton(onClick = {
+                        memory.snapshot()
+                        memory.removeCodeSkill(skillName)
+                        if (editing == skillName) editing = null
+                        onChanged()
+                    }) { Text("Borrar") }
+                }
+            }
+            val current = editing
+            if (current == null) {
+                GlowButton("Escribir una habilidad", onClick = { edit(null) }, Modifier.fillMaxWidth())
+            } else {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nombre") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Para qué sirve") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it },
+                    label = { Text("Código") },
+                    minLines = 6,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = UltraColors.Text),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                problem?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 13.sp) }
+                output?.let { Text("Resultado: $it", color = UltraColors.Text, fontSize = 13.sp) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    GlowButton("Guardar", onClick = {
+                        problem = SkillEngine.check(code)
+                        if (problem == null) {
+                            memory.snapshot()
+                            if (current.isNotEmpty() && !current.equals(name.trim(), ignoreCase = true)) memory.removeCodeSkill(current)
+                            memory.setCodeSkill(name, CodeSkill(description.trim(), code.trim()))
+                            editing = null
+                            onChanged()
+                        }
+                    }, enabled = name.isNotBlank() && description.isNotBlank() && code.isNotBlank())
+                    TextButton(onClick = {
+                        problem = SkillEngine.check(code)
+                        if (problem == null) {
+                            output = "…"
+                            lifecycleScope.launch {
+                                output = withContext(Dispatchers.Default) { SkillEngine.run(this@MainActivity, code, "") }
+                            }
+                        }
+                    }) { Text("Probar") }
+                    TextButton(onClick = { editing = null }) { Text("Cancelar") }
+                }
+            }
+        }
+    }
+
     /** Estado del pintor (crear y editar imágenes con IA) y botón para descargarlo. */
     @Composable
     private fun PainterCard() {
@@ -952,25 +1098,35 @@ class MainActivity : ComponentActivity() {
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SectionTitle("Ultra Yo quiere cambiarse", change.description)
+            SectionTitle(if (change.undoable) "Ultra Yo quiere cambiarse" else "Ultra Yo necesita tu permiso", change.description)
             if (change.detail.isNotBlank()) {
                 Text(
-                    change.detail.take(600),
+                    change.detail.take(4000),
                     color = UltraColors.Text,
                     fontSize = 13.sp,
+                    fontFamily = if (change.restartsSkills) FontFamily.Monospace else null,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(max = 260.dp)
                         .glass(12.dp)
+                        .verticalScroll(rememberScrollState())
                         .padding(10.dp),
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 GlowButton("Aplicar", onClick = {
-                    memory.snapshot()
+                    if (change.undoable) memory.snapshot()
                     change.apply(memory)
                     SelfEdits.pending.value = null
                     brainDirty = true
-                    Assistant.say("Hecho: ${change.description.replaceFirstChar { it.lowercase() }}. Si no te gusta, dime \"deshaz el último cambio\".")
+                    val what = change.description.replaceFirstChar { it.lowercase() }
+                    Assistant.say(
+                        when {
+                            change.restartsSkills -> "Hecho: $what. He reiniciado mi motor de habilidades y ya está cargado. Si no te gusta, dime \"deshaz el último cambio\"."
+                            change.undoable -> "Hecho: $what. Si no te gusta, dime \"deshaz el último cambio\"."
+                            else -> "Hecho: $what."
+                        }
+                    )
                 })
                 TextButton(onClick = {
                     SelfEdits.pending.value = null

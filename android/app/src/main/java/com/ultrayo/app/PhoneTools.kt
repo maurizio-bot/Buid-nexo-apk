@@ -9,16 +9,9 @@ import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 
-private const val MAX_RESULTS = 40
-private const val MAX_TEXT = 6000
-private val TEXT_EXTENSIONS = setOf(
-    "txt", "md", "csv", "json", "xml", "html", "htm", "log", "kt", "java", "py", "js", "ts",
-    "c", "cpp", "h", "yml", "yaml", "ini", "cfg", "properties", "gradle", "kts", "sh", "bat", "sql",
-)
-
 /**
  * Lo que la IA puede hacer en el teléfono. Todo es de solo lectura: ver y abrir apps,
- * y buscar y leer archivos en las carpetas que Maurizio le ha permitido.
+ * y buscar, enseñar y leer fotos, vídeos y documentos que Maurizio le ha permitido ver.
  */
 class PhoneTools(context: Context) : ToolSet {
 
@@ -47,47 +40,71 @@ class PhoneTools(context: Context) : ToolSet {
         return "Abriendo ${match.key}."
     }
 
-    @Tool(description = "Busca archivos por nombre en las carpetas permitidas. Devuelve sus rutas.")
+    @Tool(description = "Busca en el teléfono fotos, vídeos, audios, documentos o cualquier archivo por su nombre o carpeta. Devuelve sus rutas.")
     fun buscarArchivos(
-        @ToolParam(description = "Parte del nombre del archivo; vacío para listar todo") texto: String,
+        @ToolParam(description = "Palabras del nombre o de la carpeta, por ejemplo factura, WhatsApp o Camera; vacío para ver los últimos") texto: String,
+        @ToolParam(description = "Tipo: foto, vídeo, audio, documento, o vacío para cualquiera") tipo: String,
     ): List<String> {
         if (locked()) return listOf(LOCKED)
-        val roots = Folders.list(context)
-        if (roots.isEmpty()) return listOf("No tengo acceso a ninguna carpeta. Maurizio puede dármelo en Memoria.")
-        val wanted = texto.trim().lowercase()
-        val found = mutableListOf<String>()
-        for (uri in roots) {
-            val root = DocumentFile.fromTreeUri(context, uri) ?: continue
-            walk(root, root.name ?: "carpeta", depth = 0) { path, file ->
-                if (wanted.isEmpty() || (file.name ?: "").lowercase().contains(wanted)) found += path
-                found.size < MAX_RESULTS
-            }
-            if (found.size >= MAX_RESULTS) break
+        val canMedia = DeviceFiles.hasMedia(context)
+        if (!canMedia && Folders.list(context).isEmpty()) {
+            return listOf("No tengo permiso para ver archivos. Maurizio puede dármelo en Memoria, en Archivos que puede leer.")
         }
-        return found.ifEmpty { listOf("No encontré archivos con ese nombre.") }
+        val found = DeviceFiles.search(context, texto, tipo)
+        if (found.isNotEmpty()) return found.map { it.line() }
+        return listOf(
+            "No encontré nada con ese nombre." +
+                if (!canMedia) " Aún no tengo permiso para ver la galería (fotos y vídeos)." else ""
+        )
     }
 
-    @Tool(description = "Lee el contenido de un archivo de texto usando la ruta que devolvió buscarArchivos.")
+    @Tool(description = "Lee el texto de un documento (txt, pdf, doc, docx, xlsx, pptx, odt, rtf, epub, html…) usando la ruta que devolvió buscarArchivos.")
     fun leerArchivo(
         @ToolParam(description = "Ruta del archivo, tal como la devolvió buscarArchivos") ruta: String,
     ): String {
         if (locked()) return LOCKED
-        for (uri in Folders.list(context)) {
-            val root = DocumentFile.fromTreeUri(context, uri) ?: continue
-            var target: DocumentFile? = null
-            walk(root, root.name ?: "carpeta", depth = 0) { path, file ->
-                if (path == ruta.trim()) target = file
-                target == null
-            }
-            val file = target ?: continue
-            val extension = (file.name ?: "").substringAfterLast('.', "").lowercase()
-            if (extension !in TEXT_EXTENSIONS) return "Solo sé leer archivos de texto, no .$extension."
-            val text = context.contentResolver.openInputStream(file.uri)?.use { stream ->
-                stream.bufferedReader().readText()
-            } ?: return "No pude abrir el archivo."
-            return if (text.length > MAX_TEXT) text.take(MAX_TEXT) + "\n[…archivo recortado…]" else text
+        val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo. Búscalo primero con buscarArchivos."
+        if (file.kind == "foto" || file.kind == "vídeo") {
+            return "Es ${if (file.kind == "foto") "una foto" else "un vídeo"}: usa mostrarEnPantalla para enseñárselo a Maurizio."
         }
-        return "No encontré ese archivo."
+        return try {
+            DeviceFiles.readText(context, file)
+        } catch (e: Exception) {
+            "No pude leerlo: ${e.message}"
+        }
+    }
+
+    @Tool(description = "Enseña en el chat una foto (o un fotograma de un vídeo) usando la ruta que devolvió buscarArchivos. Después Maurizio puede preguntarte por ella.")
+    fun mostrarEnPantalla(
+        @ToolParam(description = "Ruta de la foto o del vídeo, tal como la devolvió buscarArchivos") ruta: String,
+    ): String {
+        if (locked()) return LOCKED
+        val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo."
+        if (file.kind != "foto" && file.kind != "vídeo") return "Solo puedo enseñar fotos y vídeos; para documentos usa leerArchivo."
+        return try {
+            val path = DeviceFiles.copyPreview(context, file)
+            Assistant.show(file.name, path)
+            "Ya aparece en la pantalla."
+        } catch (e: Exception) {
+            "No pude abrirla: ${e.message}"
+        }
+    }
+
+    @Tool(description = "Abre un archivo (vídeo, audio, documento…) con la app que corresponda del teléfono, para verlo o escucharlo.")
+    fun abrirArchivo(
+        @ToolParam(description = "Ruta del archivo, tal como la devolvió buscarArchivos") ruta: String,
+    ): String {
+        if (locked()) return LOCKED
+        val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo."
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(file.uri, file.mime.ifEmpty { "*/*" })
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return try {
+            context.startActivity(intent)
+            "Abriendo ${file.name}."
+        } catch (e: Exception) {
+            "No hay ninguna app para abrir ${file.name}."
+        }
     }
 
     @Tool(description = "Pasa una pregunta a Claude, la IA de Anthropic, abriendo su app. Úsalo solo si Maurizio pide preguntarle a Claude.")
@@ -96,19 +113,6 @@ class PhoneTools(context: Context) : ToolSet {
     ): String {
         if (locked()) return LOCKED
         return ClaudeLink.open(context, pregunta)
-    }
-
-    private fun walk(dir: DocumentFile, path: String, depth: Int, visit: (String, DocumentFile) -> Boolean): Boolean {
-        if (depth > 6) return true
-        for (child in dir.listFiles()) {
-            val childPath = "$path/${child.name}"
-            if (child.isDirectory) {
-                if (!walk(child, childPath, depth + 1, visit)) return false
-            } else if (!visit(childPath, child)) {
-                return false
-            }
-        }
-        return true
     }
 
     private fun launchableApps(): Map<String, String> {

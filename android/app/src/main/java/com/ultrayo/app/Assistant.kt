@@ -51,6 +51,19 @@ object Assistant {
     lateinit var memory: Memory
         private set
 
+    /** Lo último que dijo Maurizio, para que la IA solo se programe cuando él lo pide. */
+    @Volatile
+    private var lastUserText = ""
+
+    private val codeRequest = Regex(
+        "program|c[oó]digo|script|javascript|funci[oó]n|habilidad",
+        RegexOption.IGNORE_CASE,
+    )
+    private val runSkill = Regex(
+        "^(?:ejecuta|usa|lanza|corre) (?:la )?habilidad (?:programada )?(.+?)(?: con (.+))?$",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+
     private lateinit var app: Context
     private val scope = MainScope()
     private val main = Handler(Looper.getMainLooper())
@@ -111,7 +124,7 @@ object Assistant {
                         Ai.brain = Brain(
                             downloader.file.path,
                             app.cacheDir.path,
-                            listOf(PhoneTools(app), SelfTools(app)),
+                            listOf(PhoneTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
                         ).also { it.load() }
                     }
                 }
@@ -240,6 +253,7 @@ object Assistant {
         }
         val history = turns.takeLast(MAX_HISTORY)
         turns.add(Turn("user", text, image = attached?.imagePath, fileName = attached?.name))
+        lastUserText = text
 
         if (attached == null) {
             val command = text.trim()
@@ -261,6 +275,17 @@ object Assistant {
                 brainDirty = true
                 say(answer, onDone)
                 return
+            }
+            DataCommands.handle(text, DataStore.get(app))?.let { answer ->
+                say(answer, onDone)
+                return
+            }
+            runSkill.find(command.trimEnd('.', '!', '?'))?.let { match ->
+                val name = memory.findCodeSkill(match.groupValues[1])
+                if (name != null) {
+                    runCodeSkill(name, match.groupValues[2], onDone)
+                    return
+                }
             }
         }
 
@@ -303,6 +328,23 @@ object Assistant {
             }
             thinking = false
             say(reply.ifBlank { "No sé qué responder a eso." }, onDone)
+        }
+    }
+
+    /** Si Maurizio acaba de pedir que la IA programe algo. Se llama desde el hilo del modelo. */
+    fun userAskedForCode(): Boolean = codeRequest.containsMatchIn(lastUserText)
+
+    /** Enseña en el chat una foto que la IA ha encontrado en el teléfono. Se puede llamar desde cualquier hilo. */
+    fun show(name: String, imagePath: String) = main.post { turns.add(Turn("assistant", "📎 $name", image = imagePath)) }
+
+    private fun runCodeSkill(name: String, input: String, onDone: (() -> Unit)?) {
+        val code = memory.codeSkills().getValue(name).code
+        thinking = true
+        status = "Ejecutando \"$name\"…"
+        scope.launch {
+            val result = withContext(Dispatchers.Default) { SkillEngine.run(app, code, input) }
+            thinking = false
+            say(result, onDone)
         }
     }
 

@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.8.0"
+        versionCode = 11
+        versionName = "0.9.0"
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior
@@ -66,4 +66,8 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
+    // Motor de habilidades programadas: JavaScript interpretado dentro de la app
+    implementation("org.mozilla:rhino:1.7.15")
+    // Leer el texto de los PDF
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 }
