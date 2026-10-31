@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.8.0"
+        versionCode = 16
+        versionName = "0.11.2"
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior
@@ -32,6 +32,9 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+        }
+        resources {
+            excludes += setOf("META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/DEPENDENCIES")
         }
     }
 
@@ -66,4 +69,13 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
+    // Motor de habilidades programadas: JavaScript interpretado dentro de la app
+    implementation("org.mozilla:rhino:1.7.15")
+    // Leer el texto de los PDF
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // Leer el texto de las fotos sin internet (el modelo va dentro de la app)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Descomprimir zip, 7z, tar, gz, bz2 y xz
+    implementation("org.apache.commons:commons-compress:1.26.2")
+    implementation("org.tukaani:xz:1.9")
 }

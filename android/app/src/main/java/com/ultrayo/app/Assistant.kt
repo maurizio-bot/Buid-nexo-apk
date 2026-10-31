@@ -22,6 +22,7 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 private const val MAX_HISTORY = 20
+private const val MAX_PROMPT = 6000
 
 /** Lo que el usuario adjunta antes de enviar: una foto ya copiada al teléfono o el texto de un archivo. */
 data class Attachment(val name: String, val imagePath: String? = null, val text: String? = null)
@@ -50,6 +51,23 @@ object Assistant {
 
     lateinit var memory: Memory
         private set
+
+    /** Lo último que dijo Maurizio, para que la IA solo se programe cuando él lo pide. */
+    @Volatile
+    private var lastUserText = ""
+
+    private val codeRequest = Regex(
+        "program|c[oó]digo|script|javascript|funci[oó]n|habilidad",
+        RegexOption.IGNORE_CASE,
+    )
+    private val readTextRequest = Regex(
+        "(lee|l[eé]eme|extrae|saca|copia)[^.?]*\\b(texto|pone|dice|escrito|letras)|qu[eé] (pone|dice|est[aá] escrito)|transcr[ií]be|p[aá]sa(la|me)? a texto|\\bocr\\b",
+        RegexOption.IGNORE_CASE,
+    )
+    private val runSkill = Regex(
+        "^(?:ejecuta|usa|lanza|corre) (?:la )?habilidad (?:programada )?(.+?)(?: con (.+))?$",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
 
     private lateinit var app: Context
     private val scope = MainScope()
@@ -111,7 +129,7 @@ object Assistant {
                         Ai.brain = Brain(
                             downloader.file.path,
                             app.cacheDir.path,
-                            listOf(PhoneTools(app), SelfTools(app)),
+                            listOf(PhoneTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
                         ).also { it.load() }
                     }
                 }
@@ -240,6 +258,7 @@ object Assistant {
         }
         val history = turns.takeLast(MAX_HISTORY)
         turns.add(Turn("user", text, image = attached?.imagePath, fileName = attached?.name))
+        lastUserText = text
 
         if (attached == null) {
             val command = text.trim()
@@ -257,15 +276,48 @@ object Assistant {
                 say(if (locked()) "Desbloquea el teléfono y te paso a Claude." else ClaudeLink.open(app, question), onDone)
                 return
             }
+            // Llamadas a herramientas pegadas o escritas a mano, y "crea una habilidad llamada X: …"
+            (WrittenCalls.handle(app, text)?.done?.joinToString(" ") ?: WrittenCalls.skillCommand(app, text))?.let { answer ->
+                say(answer, onDone)
+                return
+            }
             Teaching.handle(text, memory)?.let { answer ->
                 brainDirty = true
                 say(answer, onDone)
                 return
             }
+            DataCommands.handle(text, app)?.let { answer ->
+                say(answer, onDone)
+                return
+            }
+            runSkill.find(command.trimEnd('.', '!', '?'))?.let { match ->
+                val name = memory.findCodeSkill(match.groupValues[1])
+                if (name != null) {
+                    runCodeSkill(name, match.groupValues[2], onDone)
+                    return
+                }
+            }
+        }
+
+        if (attached != null && Regex("^(guarda|gu[aá]rdame|almacena)", RegexOption.IGNORE_CASE).containsMatchIn(text.trim())) {
+            val saved = runCatching {
+                val dir = Vault.files(app)
+                if (attached.imagePath != null) {
+                    java.io.File(attached.imagePath).copyTo(java.io.File(dir, "foto-${System.currentTimeMillis()}.jpg"))
+                } else {
+                    java.io.File(dir, attached.name).also { it.writeText(attached.text.orEmpty()) }
+                }
+            }
+            say(saved.fold({ "Guardado en mi carpeta: ${it.path}." }, { "No pude guardarlo: ${it.message}" }), onDone)
+            return
         }
 
         if (attached == null || attached.imagePath != null) {
             val target = attached?.imagePath ?: recentImage(history)
+            if (target != null && readTextRequest.containsMatchIn(text)) {
+                readText(target, onDone)
+                return
+            }
             ImageCommands.parse(text, target != null)?.let { command ->
                 image(command, target, onDone)
                 return
@@ -294,15 +346,62 @@ object Assistant {
         scope.launch {
             val reply = try {
                 withContext(Ai.thread) {
-                    if (reset) brain.reset(systemPrompt, history)
-                    brain.ask(prompt, attached?.imagePath)
+                    try {
+                        if (reset) brain.reset(systemPrompt, history)
+                        brain.ask(prompt, attached?.imagePath)
+                    } catch (e: Exception) {
+                        if (!Brain.isFull(e)) throw e
+                        // La conversación ya no cabe: empieza de cero (la memoria se conserva) y lo intenta otra vez.
+                        brain.reset(systemPrompt, emptyList())
+                        brain.ask(prompt.take(MAX_PROMPT), attached?.imagePath)
+                    }
                 }
             } catch (e: Exception) {
                 brainDirty = true
-                "Algo falló: ${e.message}"
+                if (Brain.isFull(e)) {
+                    "Eso es demasiado largo para leerlo de una vez. Pídeme una parte concreta, por ejemplo un archivo de dentro."
+                } else {
+                    "Algo falló: ${e.message}"
+                }
             }
             thinking = false
-            say(reply.ifBlank { "No sé qué responder a eso." }, onDone)
+            // Si el modelo escribió la herramienta como texto en vez de usarla, se hace por él.
+            val written = WrittenCalls.handle(app, reply)
+            val shown = if (written != null) (written.remainingText + "\n\n" + written.done.joinToString(" ")).trim() else reply
+            say(shown.ifBlank { "No sé qué responder a eso." }, onDone)
+        }
+    }
+
+    /** Lee el texto escrito en una foto, dentro del teléfono, y lo pone en el chat. */
+    private fun readText(imagePath: String, onDone: (() -> Unit)?) {
+        thinking = true
+        status = "Leyendo el texto de la imagen…"
+        scope.launch {
+            val text = try {
+                withContext(Dispatchers.Default) { Ocr.read(imagePath).trim() }
+            } catch (e: Exception) {
+                thinking = false
+                return@launch say("No pude leer la imagen: ${e.message}", onDone)
+            }
+            thinking = false
+            say(if (text.isEmpty()) "No veo ningún texto en esa imagen." else "Esto es lo que pone:\n\n$text", onDone)
+        }
+    }
+
+    /** Si Maurizio acaba de pedir que la IA programe algo. Se llama desde el hilo del modelo. */
+    fun userAskedForCode(): Boolean = codeRequest.containsMatchIn(lastUserText)
+
+    /** Enseña en el chat una foto que la IA ha encontrado en el teléfono. Se puede llamar desde cualquier hilo. */
+    fun show(name: String, imagePath: String) = main.post { turns.add(Turn("assistant", "📎 $name", image = imagePath)) }
+
+    private fun runCodeSkill(name: String, input: String, onDone: (() -> Unit)?) {
+        val code = memory.codeSkills().getValue(name).code
+        thinking = true
+        status = "Ejecutando \"$name\"…"
+        scope.launch {
+            val result = withContext(Dispatchers.Default) { SkillEngine.run(app, code, input) }
+            thinking = false
+            say(result, onDone)
         }
     }
 

@@ -9,8 +9,17 @@ import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 
-/** Un cambio que la IA quiere hacerse a sí misma y que Maurizio aún no ha aceptado. */
-class SelfChange(val description: String, val detail: String, val apply: (Memory) -> Unit)
+/**
+ * Un cambio que la IA quiere hacer y que Maurizio aún no ha aceptado. [undoable] dice si entra en
+ * "deshaz el último cambio"; [restartsSkills] si hay que reiniciar el motor de habilidades al aplicarlo.
+ */
+class SelfChange(
+    val description: String,
+    val detail: String,
+    val undoable: Boolean = true,
+    val restartsSkills: Boolean = false,
+    val apply: (Memory) -> Unit,
+)
 
 /** El cambio pendiente de confirmar. Solo hay uno a la vez: el último reemplaza al anterior. */
 object SelfEdits {
@@ -38,6 +47,10 @@ class SelfTools(context: Context) : ToolSet {
             val skills = memory.skills()
             if (skills.isEmpty()) append("(ninguna)\n")
             skills.forEach { (name, text) -> append("- ").append(name).append(": ").append(text).append('\n') }
+            append("\nHABILIDADES PROGRAMADAS:\n")
+            val code = memory.codeSkills()
+            if (code.isEmpty()) append("(ninguna)\n")
+            code.forEach { (name, skill) -> append("- ").append(name).append(": ").append(skill.description).append("\n```\n").append(skill.code).append("\n```\n") }
             append("\nRECUERDOS:\n")
             val facts = memory.facts()
             if (facts.isEmpty()) append("(ninguno)\n")
