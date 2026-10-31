@@ -276,7 +276,7 @@ object Assistant {
                 say(answer, onDone)
                 return
             }
-            DataCommands.handle(text, DataStore.get(app))?.let { answer ->
+            DataCommands.handle(text, app)?.let { answer ->
                 say(answer, onDone)
                 return
             }
@@ -287,6 +287,19 @@ object Assistant {
                     return
                 }
             }
+        }
+
+        if (attached != null && Regex("^(guarda|gu[aá]rdame|almacena)", RegexOption.IGNORE_CASE).containsMatchIn(text.trim())) {
+            val saved = runCatching {
+                val dir = Vault.files(app)
+                if (attached.imagePath != null) {
+                    java.io.File(attached.imagePath).copyTo(java.io.File(dir, "foto-${System.currentTimeMillis()}.jpg"))
+                } else {
+                    java.io.File(dir, attached.name).also { it.writeText(attached.text.orEmpty()) }
+                }
+            }
+            say(saved.fold({ "Guardado en mi carpeta: ${it.path}." }, { "No pude guardarlo: ${it.message}" }), onDone)
+            return
         }
 
         if (attached == null || attached.imagePath != null) {

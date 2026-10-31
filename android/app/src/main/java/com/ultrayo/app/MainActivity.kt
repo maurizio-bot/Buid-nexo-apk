@@ -900,9 +900,10 @@ class MainActivity : ComponentActivity() {
         val items = remember(version, open) { open?.let { store.search("", it, 100) }.orEmpty() }
         Card {
             SectionTitle(
-                "Datos guardados",
-                "Dile \"guarda en gastos: 12 € comida\" o \"guarda que…\", y pregúntale \"¿qué tengo guardado de gastos?\". Se guardan en el teléfono.",
+                "Su carpeta y lo guardado",
+                "Dile \"guarda en gastos: 12 € comida\", \"guarda que…\" o \"revisa tu memoria\". Todo va a su carpeta:",
             )
+            Text("📂  ${Vault.path(this@MainActivity)}", color = UltraColors.Text, fontSize = 13.sp)
             if (collections.isEmpty()) Text("Todavía no hay nada guardado.", color = UltraColors.Muted, fontSize = 13.sp)
             collections.forEach { (name, count) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -12,10 +12,11 @@ Hablas en español, con un tono cercano y directo.
 Tus respuestas se suelen leer en voz alta: sé breve (dos o tres frases salvo que te pida más),
 no uses listas, tablas, asteriscos ni bloques de código."""
 
-/** Lo que Maurizio le enseña a su IA. Se guarda solo en el teléfono. */
+/** Lo que Maurizio le enseña a su IA. Se guarda en su carpeta del teléfono (memoria.json, ver [Vault]). */
 class Memory(context: Context) {
 
-    private val prefs = context.getSharedPreferences("ultrayo_memoria", Context.MODE_PRIVATE)
+    private val prefs = VaultPrefs.memory(context)
+    private val folder = Vault.path(context)
 
     var personality: String
         get() = prefs.getString("personality", null) ?: DEFAULT_PERSONALITY
@@ -135,8 +136,9 @@ class Memory(context: Context) {
                 "audios y documentos del teléfono, enseñarlos en pantalla y leer documentos (txt, pdf, doc, docx, xlsx…); " +
                 "y para pasarle una pregunta a Claude abriendo su app. Con los archivos solo puedes leer: no puedes " +
                 "cambiar ni borrar nada. Úsalas solo cuando te lo pida." +
-                "\n\nTienes una base de datos en el teléfono: cuando Maurizio te pida guardar, apuntar o registrar algo, " +
-                "usa guardarDato; cuando pregunte por algo guardado, usa buscarDatos." +
+                "\n\nTu carpeta de almacenamiento es $folder: ahí está tu memoria, tu base de datos y los archivos que " +
+                "Maurizio te pide guardar. Cuando te pida guardar, apuntar o registrar algo, usa guardarDato; si es un " +
+                "archivo, guardarArchivo. Cuando te pida revisar tu memoria o buscar algo guardado, usa revisarMemoria." +
                 "\n\nSi Maurizio te pide que cambies tu forma de ser, tus reglas o tus habilidades, usa las " +
                 "herramientas proponer… para cambiarte o borrarte a ti mismo. Maurizio confirma cada cambio en la " +
                 "pantalla, así que dile que lo revise. No las uses si él no te lo ha pedido."

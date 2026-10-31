@@ -11,6 +11,7 @@ import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Size
+import android.webkit.MimeTypeMap
 import androidx.core.content.ContextCompat
 import java.io.File
 import java.text.SimpleDateFormat
@@ -97,6 +98,20 @@ object DeviceFiles {
         if (hasMedia(context) && wantedKind != "documento" && wantedKind != "archivo") {
             found += media(context, words, wantedKind, limit).filter(::matches)
         }
+        // Lo que Ultra Yo ha guardado en su propia carpeta
+        for (file in Vault.listFiles(context)) {
+            if (found.size >= limit) break
+            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(DocReader.extension(file.name)) ?: ""
+            val f = FoundFile(
+                path = "Ultra Yo/" + file.relativeTo(Vault.dir(context)).path,
+                uri = Uri.fromFile(file),
+                name = file.name,
+                mime = mime,
+                size = file.length(),
+                modified = file.lastModified(),
+            )
+            if (matches(f)) found += f
+        }
         if (found.size < limit) {
             for (root in Folders.list(context)) {
                 walkTree(context, root) { f ->
@@ -125,7 +140,7 @@ object DeviceFiles {
 
     /** Copia una foto (o un fotograma de un vídeo) reducida a la caché, para enseñarla en el chat y que el modelo la pueda mirar. */
     fun copyPreview(context: Context, file: FoundFile, maxSide: Int = 1024): String {
-        val bitmap = if (file.kind == "vídeo") {
+        val bitmap = if (file.kind == "vídeo" && file.uri.scheme == "content") {
             context.contentResolver.loadThumbnail(file.uri, Size(maxSide, maxSide), null)
         } else {
             ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, file.uri)) { decoder, info, _ ->

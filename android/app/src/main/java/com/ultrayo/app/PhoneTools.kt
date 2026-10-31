@@ -96,6 +96,7 @@ class PhoneTools(context: Context) : ToolSet {
     ): String {
         if (locked()) return LOCKED
         val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo."
+        if (file.uri.scheme == "file") return "Está en mi carpeta, ${file.uri.path}. Maurizio puede abrirlo desde su explorador de archivos."
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(file.uri, file.mime.ifEmpty { "*/*" })
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)

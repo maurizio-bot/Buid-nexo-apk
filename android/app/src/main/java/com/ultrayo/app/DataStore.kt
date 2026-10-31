@@ -29,8 +29,8 @@ data class Datum(val id: Long, val collection: String, val text: String, val cre
  * a reinicios y actualizaciones de la app. A diferencia de los recuerdos, no va entera en cada
  * conversación: la IA la consulta cuando hace falta, así que puede crecer mucho.
  */
-class DataStore private constructor(context: Context) :
-    SQLiteOpenHelper(context, "ultrayo_datos.db", null, 1) {
+class DataStore private constructor(context: Context, path: String) :
+    SQLiteOpenHelper(context, path, null, 1) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -97,14 +97,22 @@ class DataStore private constructor(context: Context) :
         @Volatile
         private var instance: DataStore? = null
 
+        /** La base de datos vive en la carpeta de Ultra Yo. Si había una dentro de la app (versión 0.9.0), se mueve allí. */
+        private fun databaseFile(context: Context): java.io.File {
+            val file = java.io.File(Vault.dir(context), "datos.db")
+            val old = context.getDatabasePath("ultrayo_datos.db")
+            if (!file.exists() && old.exists()) runCatching { old.copyTo(file) }
+            return file
+        }
+
         fun get(context: Context): DataStore =
             instance ?: synchronized(this) {
-                instance ?: DataStore(context.applicationContext).also { instance = it }
+                instance ?: DataStore(context.applicationContext, databaseFile(context).path).also { instance = it }
             }
     }
 }
 
-/** Herramientas para que la IA guarde y consulte datos. Guardar es directo; borrar lo confirma Maurizio. */
+/** Herramientas para que la IA guarde y consulte datos en su carpeta. Guardar es directo; borrar lo confirma Maurizio. */
 class DataTools(context: Context) : ToolSet {
 
     private val context = context.applicationContext
@@ -119,6 +127,27 @@ class DataTools(context: Context) : ToolSet {
         if (texto.isBlank()) return "No hay nada que guardar."
         val id = store.add(coleccion, texto)
         return "Guardado en ${coleccion.trim().lowercase().ifBlank { DEFAULT_COLLECTION }} con el número $id."
+    }
+
+    @Tool(description = "Revisa tu memoria: busca en tu carpeta de almacenamiento (datos guardados, recuerdos y archivos guardados).")
+    fun revisarMemoria(
+        @ToolParam(description = "Palabras a buscar; vacío para ver lo último que guardaste") texto: String,
+    ): List<String> {
+        if (locked()) return listOf(LOCKED)
+        return MemoryCheck.search(context, texto)
+    }
+
+    @Tool(description = "Guarda en tu carpeta una copia de un archivo del teléfono (foto, vídeo, documento…) usando la ruta que devolvió buscarArchivos. El original no se toca.")
+    fun guardarArchivo(
+        @ToolParam(description = "Ruta del archivo, tal como la devolvió buscarArchivos") ruta: String,
+    ): String {
+        if (locked()) return LOCKED
+        val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo."
+        return try {
+            "Guardado en ${Vault.keepCopy(context, file.uri, file.name).path}."
+        } catch (e: Exception) {
+            "No pude guardarlo: ${e.message}"
+        }
     }
 
     @Tool(description = "Busca en los datos guardados. Devuelve cada dato con su número, colección y fecha.")
@@ -167,14 +196,26 @@ object DataCommands {
         "^(?:guarda|registra|anota)(?: esto| este dato| que)?[:,]?\\s+(.+)$",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
     )
+    private val review = Regex(
+        "^(?:revisa|mira|busca en) (?:tu|la|en tu) memoria(?:\\s*[,:]?\\s*(?:y )?(?:busca |buscando |sobre |de |por )?(.+))?$",
+        RegexOption.IGNORE_CASE,
+    )
+    private val where = Regex("d[oó]nde (?:guardas|est[aá]n?|tienes) (?:las cosas|tu (?:memoria|carpeta)|lo que (?:te pido|guardas)|tus datos)", RegexOption.IGNORE_CASE)
     private val list = Regex(
         "^(?:¿\\s*)?(?:qu[eé] (?:tengo|hay) guardado|mu[eé]strame (?:lo guardado|mis datos|los datos)|busca en (?:mis |los )?(?:datos|lo guardado))(?:\\s+(?:en|de|sobre|con)\\s+(?:la |el |los |las |mis )?(.+))?$",
         RegexOption.IGNORE_CASE,
     )
 
     /** Devuelve la respuesta si [text] era una orden de datos, o null si no lo era. */
-    fun handle(text: String, store: DataStore): String? {
-        val t = text.trim().trimEnd('.', '!', '?')
+    fun handle(text: String, context: Context): String? {
+        val store = DataStore.get(context)
+        val t = text.trim().trimStart('¿').trimEnd('.', '!', '?')
+        if (where.containsMatchIn(t)) {
+            return "Todo lo guardo en mi carpeta: ${Vault.path(context)}. Ahí están mi memoria, mis datos y los archivos que me pides guardar."
+        }
+        review.find(t)?.let { m ->
+            return MemoryCheck.search(context, m.groupValues[1], limit = 8).joinToString(". ")
+        }
         saveIn.find(t)?.let { m ->
             val id = store.add(m.groupValues[1], m.groupValues[2])
             return "Guardado en ${m.groupValues[1].lowercase()}, es el dato número $id."
