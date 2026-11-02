@@ -2,6 +2,7 @@ package com.ultrayo.app
 
 import android.Manifest
 import android.app.KeyguardManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -68,6 +69,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -207,6 +209,15 @@ class MainActivity : ComponentActivity() {
         refreshDownload()
         // La voz rápida se descarga sola la primera vez (si no se ha apagado en Ajustes).
         if (memory.fastVoice) Assistant.downloadFastVoice()
+        talkRequested = intent?.action == ACTION_TALK
+    }
+
+    /** La han abierto con el botón de voz del manos libres: escuchar en cuanto esté delante. */
+    private var talkRequested = false
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == ACTION_TALK) talkRequested = true
     }
 
     override fun onResume() {
@@ -218,7 +229,9 @@ class MainActivity : ComponentActivity() {
         phoneAccess = hasPhonePermissions()
         if (brainReady) maybeStartWake()
         // Con el teléfono bloqueado (abierta con el botón lateral) empieza a escuchar sola.
-        if (locked && brainReady && hasMicPermission() && !listening && !thinking) listenNow()
+        val talk = talkRequested
+        talkRequested = false
+        if ((locked || talk) && brainReady && hasMicPermission() && !listening && !thinking) listenNow()
     }
 
     private fun hasMicPermission() =
@@ -411,7 +424,7 @@ class MainActivity : ComponentActivity() {
         }
         Assistant.stopSpeaking()
         val service = UltraService.instance
-        if (service != null) service.wake() else Assistant.converse()
+        if (service != null) service.wake() else Assistant.startConversation()
     }
 
     private fun sendTyped(text: String) {
@@ -795,6 +808,7 @@ class MainActivity : ComponentActivity() {
                         wakeOn,
                     ) { setWake(it) }
                     FastVoiceSettings()
+                    BluetoothSettings()
                     SettingSwitch(
                         "Contestar en voz alta",
                         "Si lo apagas, contesta por escrito. También puedes decirle \"modo texto\" o \"modo voz\".",
@@ -949,6 +963,32 @@ class MainActivity : ComponentActivity() {
             }
             item { Spacer(Modifier.height(16.dp)) }
         }
+    }
+
+    /** Manos libres y coche por Bluetooth. */
+    @Composable
+    private fun BluetoothSettings() {
+        var on by remember { mutableStateOf(memory.bluetooth) }
+        var device by remember { mutableStateOf(Bluetooth.connectedName) }
+        DisposableEffect(Unit) {
+            Bluetooth.onChange = { device = Bluetooth.connectedName }
+            onDispose { Bluetooth.onChange = null }
+        }
+        SettingSwitch(
+            "Manos libres y coche (Bluetooth)",
+            "Al hablar con Ultra usa el micrófono y los altavoces de los cascos o del coche, y al terminar los suelta para que vuelva la música. " +
+                "El botón de voz del volante o la pulsación larga de los cascos también la llaman: si se abre Google o Bixby, elige Ultra Yo y \"Siempre\".",
+            on,
+        ) {
+            memory.bluetooth = it
+            on = it
+            if (!it) Bluetooth.close()
+        }
+        Text(
+            if (device.isNotEmpty()) "Conectado: $device" else "Ningún manos libres conectado ahora.",
+            color = if (device.isNotEmpty()) UltraColors.Accent else UltraColors.Muted,
+            fontSize = 13.sp,
+        )
     }
 
     /** La voz rápida: oído y voz neural dentro del teléfono (sherpa-onnx). */
@@ -1709,5 +1749,10 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    companion object {
+        /** Abrir y empezar a escuchar (botón de voz del manos libres o del coche). */
+        const val ACTION_TALK = "com.ultrayo.app.HABLAR"
     }
 }

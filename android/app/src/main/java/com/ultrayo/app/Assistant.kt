@@ -123,6 +123,7 @@ object Assistant {
             })
         }
         NeuralVoice.onDone = { utteranceDone(it) }
+        Bluetooth.init(app)
         loadFastVoice()
     }
 
@@ -353,6 +354,25 @@ object Assistant {
     }
 
     /**
+     * Empieza a conversar por voz (reactor, "Ultra" o el botón de voz del manos libres): si hay un
+     * manos libres o un coche conectado, primero enlaza su micrófono y sus altavoces.
+     */
+    fun startConversation(ear: Ear = bestEar(), onEnd: () -> Unit = {}) {
+        if (Bluetooth.linked == null && Bluetooth.connectedName.isNotEmpty() && memory.bluetooth) {
+            status = "Conectando con ${Bluetooth.connectedName}…"
+        }
+        if (connecting) return
+        connecting = true
+        Bluetooth.open {
+            connecting = false
+            if (status.startsWith("Conectando con")) status = ""
+            converse(ear, onEnd)
+        }
+    }
+
+    private var connecting = false
+
+    /**
      * Conversación por voz: escucha, responde en voz alta y vuelve a escuchar,
      * hasta que Maurizio se calla. Entonces llama a [onEnd].
      */
@@ -500,6 +520,7 @@ object Assistant {
         if (neuralVoiceOn()) {
             NeuralVoice.speak(spoken, id, speed = 1.08f)
         } else {
+            if (queued == 1) tts?.setAudioAttributes(AudioRoute.speechAttributes())
             tts?.speak(spoken, TextToSpeech.QUEUE_ADD, null, id)
         }
         startWatching()

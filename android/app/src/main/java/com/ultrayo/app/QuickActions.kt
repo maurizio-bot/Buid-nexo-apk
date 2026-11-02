@@ -476,8 +476,25 @@ object QuickActions {
             ?: found.firstOrNull { norm(it.name).split(" ").firstOrNull() == wanted }
             ?: found.firstOrNull { norm(it.name).startsWith(wanted) }
             ?: found.firstOrNull { norm(it.name).contains(wanted) }
+            ?: soundsLike(found, wanted)
             ?: return null
         return best.copy(number = international(c, best.number))
+    }
+
+    /**
+     * Si no está escrito igual, busca el contacto que suena parecido ("Javi" / "Xavi", "Yésica" / "Jessica",
+     * o un nombre mal oído por el micrófono del coche). Solo si hay uno claro: con dudas, mejor no llamar a otro.
+     */
+    private fun soundsLike(found: List<Contact>, wanted: String): Contact? {
+        val key = Spoken.key(wanted)
+        if (key.length < 3) return null
+        val heard = Spoken.words(wanted)
+        val matches = found.filter { contact ->
+            val first = Spoken.key(contact.name.split(" ").first())
+            Spoken.key(contact.name) == key || first == key ||
+                Spoken.close(Spoken.key(contact.name), key) || Spoken.close(first, key) || Spoken.find(heard, contact.name) > 0
+        }.distinctBy { norm(it.name) }
+        return matches.singleOrNull()
     }
 
     private fun missingContact(c: Context, who: String): String {

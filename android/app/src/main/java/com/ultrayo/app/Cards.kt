@@ -257,10 +257,15 @@ object Spoken {
     /** Una clave para comparar nombres enteros. */
     fun key(name: String): String = words(name).filterNot { it in filler }.joinToString("")
 
+    /**
+     * Cuántas letras pueden fallar. Con el micrófono del coche o de unos cascos (Bluetooth, sonido de
+     * teléfono) se oye peor, así que en nombres largos deja un poco más de margen.
+     */
     private fun tolerance(length: Int) = when {
         length <= 4 -> 0
-        length <= 8 -> 1
-        else -> 2
+        length <= 6 -> 1
+        length <= 8 -> if (AudioRoute.callMode) 2 else 1
+        else -> if (AudioRoute.callMode) 3 else 2
     }
 
     /** Casi iguales; las cifras tienen que coincidir ("proyecto 1" no es "proyecto 2"). */

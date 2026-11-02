@@ -153,7 +153,7 @@ class UltraService : Service() {
         busy = true
         val mine = ++session
         stopVosk()
-        Assistant.converse(ear) {
+        Assistant.startConversation(ear) {
             if (session == mine) {
                 busy = false
                 startWake()
