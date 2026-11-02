@@ -4,14 +4,16 @@ import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 
 /**
- * Lo que la IA puede hacer en el teléfono. Todo es de solo lectura: ver y abrir apps,
- * y buscar, enseñar y leer fotos, vídeos y documentos que Maurizio le ha permitido ver.
+ * Lo que la IA puede hacer en el teléfono: ver y abrir apps; buscar, enseñar y leer archivos;
+ * consultar contactos, agenda, SMS, llamadas, notificaciones y el estado del sistema. Leer es libre;
+ * copiar, mover, renombrar o borrar fuera de Ultra Yo espera el "sí" de Maurizio.
  */
 class PhoneTools(context: Context) : ToolSet {
 
@@ -47,8 +49,8 @@ class PhoneTools(context: Context) : ToolSet {
     ): List<String> {
         if (locked()) return listOf(LOCKED)
         val canMedia = DeviceFiles.hasMedia(context)
-        if (!canMedia && Folders.list(context).isEmpty()) {
-            return listOf("No tengo permiso para ver archivos. Maurizio puede dármelo en Memoria, en Archivos que puede leer.")
+        if (!canMedia && !DeviceFiles.allFiles() && Folders.list(context).isEmpty()) {
+            return listOf("No tengo permiso para ver archivos. Maurizio puede dármelo en Memoria > Acceso al teléfono.")
         }
         val found = DeviceFiles.search(context, texto, tipo)
         if (found.isNotEmpty()) return found.map { it.line() }
@@ -121,15 +123,57 @@ class PhoneTools(context: Context) : ToolSet {
     ): String {
         if (locked()) return LOCKED
         val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo."
-        if (file.uri.scheme == "file") return "Está en mi carpeta, ${file.uri.path}. Maurizio puede abrirlo desde su explorador de archivos."
+        val uri = if (file.uri.scheme == "file") {
+            runCatching {
+                FileProvider.getUriForFile(context, "${context.packageName}.archivos", java.io.File(file.uri.path!!))
+            }.getOrNull() ?: return "Está en ${file.path}. Maurizio puede abrirlo desde su explorador de archivos."
+        } else {
+            file.uri
+        }
         val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(file.uri, file.mime.ifEmpty { "*/*" })
+            .setDataAndType(uri, file.mime.ifEmpty { "*/*" })
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
         return try {
             context.startActivity(intent)
             "Abriendo ${file.name}."
         } catch (e: Exception) {
             "No hay ninguna app para abrir ${file.name}."
+        }
+    }
+
+    @Tool(description = "Consulta datos del teléfono (solo lectura): contactos, agenda, sms, llamadas, notificaciones o sistema (batería, almacenamiento, RAM, red). Úsala cuando Maurizio pregunte por sus citas, mensajes, quién le llamó, qué notificaciones tiene o cómo está el teléfono.")
+    fun consultarTelefono(
+        @ToolParam(description = "Qué consultar: contactos, agenda, sms, llamadas, notificaciones o sistema") que: String,
+        @ToolParam(description = "Filtro: un nombre o palabra; para agenda hoy, mañana, semana o mes; para llamadas perdidas; para sms sin leer; vacío para lo último") texto: String,
+    ): String {
+        if (locked()) return LOCKED
+        return PhoneData.query(context, que, texto)
+    }
+
+    @Tool(description = "Apunta una cita o evento en la agenda: abre la agenda con todo rellenado y Maurizio lo guarda con un toque.")
+    fun apuntarEnAgenda(
+        @ToolParam(description = "Título del evento") titulo: String,
+        @ToolParam(description = "Fecha en formato AAAA-MM-DD") fecha: String,
+        @ToolParam(description = "Hora en formato HH:MM, o vacío si es todo el día") hora: String,
+        @ToolParam(description = "Lugar, o vacío") lugar: String,
+    ): String {
+        if (locked()) return LOCKED
+        if (Control.stopped) return "Maurizio ha pulsado Parar."
+        return PhoneData.addEvent(context, titulo, fecha, hora, lugar)
+    }
+
+    @Tool(description = "Copia, mueve, renombra o borra un archivo del teléfono, solo si Maurizio lo ha pedido. Fuera de tu carpeta Ultra Yo, Maurizio lo confirma con un sí.")
+    fun gestionarArchivo(
+        @ToolParam(description = "copiar, mover, renombrar o borrar") accion: String,
+        @ToolParam(description = "Ruta del archivo, tal como la devolvió buscarArchivos") ruta: String,
+        @ToolParam(description = "Para copiar o mover, la carpeta de destino (por ejemplo Download, Documents/Facturas o Ultra Yo); para renombrar, el nombre nuevo; para borrar, vacío") destino: String,
+    ): String {
+        if (locked()) return LOCKED
+        if (Control.stopped) return "Maurizio ha pulsado Parar."
+        return try {
+            FileOps.handle(context, accion, ruta, destino)
+        } catch (e: Exception) {
+            "No pude hacerlo: ${e.message}"
         }
     }
 
