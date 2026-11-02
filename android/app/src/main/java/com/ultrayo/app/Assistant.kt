@@ -64,6 +64,14 @@ object Assistant {
         "(lee|l[eé]eme|extrae|saca|copia)[^.?]*\\b(texto|pone|dice|escrito|letras)|qu[eé] (pone|dice|est[aá] escrito)|transcr[ií]be|p[aá]sa(la|me)? a texto|\\bocr\\b",
         RegexOption.IGNORE_CASE,
     )
+    private val webRequest = Regex(
+        "^(?:busca(?:me)?|mira|consulta|investiga)(?: en| por)? (?:internet|la web|google|la red)(?: sobre| qu[eé]| si| c[oó]mo| cu[aá]l| d[oó]nde)?[,:]?\\s*(.+)$|^(?:qu[eé] dicen en internet (?:de|sobre))\\s+(.+)$",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+    private val docsRequest = Regex(
+        "^(?:busca|mira|consulta|revisa)(?: en)? (?:mis|los) (?:documentos|archivos|apuntes|notas|pdfs?)(?: sobre| qu[eé]| si| c[oó]mo| cu[aá]l| d[oó]nde| lo que)?[,:]?\\s*(.*)$|^seg[uú]n mis (?:documentos|archivos|apuntes|notas)[,:]?\\s*(.*)$",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
     private val runSkill = Regex(
         "^(?:ejecuta|usa|lanza|corre) (?:la )?habilidad (?:programada )?(.+?)(?: con (.+))?$",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
@@ -91,6 +99,8 @@ object Assistant {
         if (::app.isInitialized) return
         app = context.applicationContext
         memory = Memory(app)
+        WebCache.init(app)
+        Learner.init(app)
         Control.init(app)
         brainReady = Ai.brain != null
         tts = TextToSpeech(app) { result ->
@@ -129,21 +139,54 @@ object Assistant {
             try {
                 withContext(Ai.thread) {
                     if (Ai.brain == null) {
+                        val gpu = GpuGuard.beforeLoad(app)
                         Ai.brain = Brain(
                             downloader.file.path,
                             app.cacheDir.path,
-                            listOf(PhoneTools(app), ControlTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
-                        ).also { it.load() }
+                            listOf(PhoneTools(app), ControlTools(app), KnowledgeTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
+                        ).also {
+                            it.load(useGpu = gpu)
+                            GpuGuard.afterLoad(app, tried = gpu, onGpu = it.onGpu)
+                        }
                     }
                 }
+                brainModel = downloader.model
                 brainReady = true
+                brainDirty = true
                 status = ""
                 onReady()
             } catch (e: Exception) {
                 status = "No pude cargar el modelo: ${e.message}"
+                // Si falla un cerebro nuevo (por ejemplo uno propio mal convertido), vuelve al ligero.
+                if (downloader.model != BrainModel.LIGHT && ModelDownloader(app, BrainModel.LIGHT).isReady()) {
+                    BrainModel.select(app, BrainModel.LIGHT)
+                    status = "No pude cargar ${downloader.model.label} (${e.message}). Vuelvo al ligero."
+                    scope.launch { loadBrain(onReady) }
+                }
             } finally {
                 loading = false
             }
+        }
+    }
+
+    /** Un aviso corto para enseñar al terminar la respuesta (por ejemplo "Apuntado para la próxima vez"). */
+    private var afterNote: String? = null
+
+    /** El cerebro cargado ahora (para enseñarlo en Ajustes). */
+    var brainModel by mutableStateOf<BrainModel?>(null)
+
+    /** Cambia de cerebro: suelta el actual y carga el que esté elegido. */
+    fun reloadBrain(onReady: () -> Unit = {}) {
+        if (loading) return
+        stopSpeaking()
+        brainReady = false
+        scope.launch {
+            withContext(Ai.thread) {
+                Ai.brain?.close()
+                Ai.brain = null
+            }
+            brainDirty = true
+            loadBrain(onReady)
         }
     }
 
@@ -405,6 +448,56 @@ object Assistant {
                 say(if (locked()) "Desbloquea el teléfono y te paso a Claude." else ClaudeLink.open(app, question), onDone)
                 return
             }
+            Expert.questionIn(text)?.let { question ->
+                askExpert(question, history, onDone)
+                return
+            }
+            // Cuentas: exactas y al instante, sin pasar por el modelo.
+            Calculator.fromSpeech(command)?.let { expression ->
+                runCatching { Calculator.format(Calculator.eval(expression)) }.getOrNull()?.let { result ->
+                    say("Son $result.", onDone)
+                    return
+                }
+            }
+            webRequest.find(command)?.let { match ->
+                val query = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }.orEmpty().trim()
+                if (query.length > 1) {
+                    retrieveThenAsk(text, history, onDone, "Buscando y leyendo en internet…") {
+                        val pages = WebSearch.readTop(query, pages = 3)
+                        if (pages.isBlank()) null
+                        else "Lo que dicen las mejores páginas sobre \"$query\":\n$pages\n\n" +
+                            "Pregunta de Maurizio: $text\n\nContesta resumiendo lo que dicen estas páginas, sin inventar nada que no esté en " +
+                            "ellas, y di de qué web sale lo importante. Si no bastan o se contradicen, dilo."
+                    }
+                    return
+                }
+            }
+            docsRequest.find(command)?.let { match ->
+                val query = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }?.trim() ?: text
+                retrieveThenAsk(text, history, onDone, "Buscando en tus documentos…") {
+                    "Fragmentos de los documentos de Maurizio:\n${DocIndex.formatted(app, query)}\n\nPregunta de Maurizio: $text\n\n" +
+                        "Contesta solo con lo que digan esos fragmentos y cita el archivo entre paréntesis, por ejemplo (según factura.pdf). " +
+                        "Si no está ahí, dilo claro en vez de inventarlo."
+                }
+                return
+            }
+            // El tiempo, la moneda, las noticias y Wikipedia: directos, sin buscador ni modelo.
+            LiveInfo.direct(app, command)?.let { work ->
+                thinking = true
+                status = "Mirándolo…"
+                scope.launch {
+                    val answer = runCatching { withContext(Dispatchers.IO) { work() } }
+                        .getOrElse { "No pude consultarlo (¿hay conexión a internet?): ${it.message}" }
+                    thinking = false
+                    say(answer, onDone)
+                }
+                return
+            }
+            Learner.researchTopic(command)?.let { topic ->
+                say("Me pongo a investigar \"$topic\" en segundo plano. Te aviso cuando termine; mientras, puedo tardar algo más en contestar.", onDone)
+                Learner.research(topic) { notify(it) }
+                return
+            }
             // Llamadas a herramientas pegadas o escritas a mano, y "crea una habilidad llamada X: …"
             (WrittenCalls.handle(app, text)?.done?.joinToString(" ") ?: WrittenCalls.skillCommand(app, text))?.let { answer ->
                 say(answer, onDone)
@@ -453,26 +546,43 @@ object Assistant {
             }
         }
 
-        val brain = Ai.brain
-        if (brain == null) {
-            say("Todavía me estoy despertando. Dame un momento.", onDone)
-            return
-        }
-        if (attached?.imagePath != null && !brain.visionEnabled) {
-            say("Todavía no puedo ver fotos en este teléfono. Si quieres, descríbemela con palabras.", onDone)
-            return
-        }
         val prompt = if (attached?.text != null) {
             "$text\n\n[Archivo adjunto: ${attached.name}]\n${attached.text}"
         } else {
             text
         }
+        afterNote = Learner.maybeCorrection(text, history)
+        askModel(text, prompt, attached?.imagePath, history, onDone)
+    }
+
+    /**
+     * Pregunta al modelo del teléfono y va enseñando y diciendo la respuesta según la escribe.
+     * [text] es lo que dijo Maurizio y [prompt] lo que se le pasa al modelo (con adjuntos o fragmentos).
+     * En las preguntas difíciles le pide que piense antes en privado: ese razonamiento no se enseña ni se dice.
+     */
+    private fun askModel(text: String, prompt0: String, image: String?, history: List<Turn>, onDone: (() -> Unit)?) {
+        val brain = Ai.brain
+        if (brain == null) {
+            say("Todavía me estoy despertando. Dame un momento.", onDone)
+            return
+        }
+        if (image != null && !brain.visionEnabled) {
+            say("Todavía no puedo ver fotos en este teléfono. Si quieres, descríbemela con palabras.", onDone)
+            return
+        }
+        Learner.beforeAsk()
+        val deep = Thinking.isHard(text)
+        // Lo aprendido que viene al caso (lo importante ya va siempre en las instrucciones).
+        val always = runCatching { Recall.get(app).alwaysOn().map { it.id }.toSet() }.getOrDefault(emptySet())
+        val related = runCatching { Recall.get(app).relevant(text, k = 4, exclude = always) }.getOrDefault(emptyList())
+        val withMemory = if (related.isEmpty()) prompt0
+        else "[Cosas que aprendiste antes y pueden venir al caso:\n${related.joinToString("\n") { "- " + it.text }}]\n\n$prompt0"
+        val prompt = if (deep) Thinking.wrap(withMemory) else withMemory
         thinking = true
-        status = "Pensando…"
+        status = if (deep) "Pensando a fondo…" else "Pensando…"
         val reset = brainDirty
         brainDirty = false
         val systemPrompt = memory.systemPrompt()
-        val image = attached?.imagePath
 
         // La respuesta aparece y se dice según el modelo la escribe.
         stopSpeaking()
@@ -498,9 +608,12 @@ object Assistant {
             }
         }
 
-        val onChunk: (String) -> Unit = { delta ->
+        val hidden = Thinking.Filter()
+        val onChunk: (String) -> Unit = { raw ->
             main.post {
                 if (gen != generation) return@post
+                val delta = hidden.feed(raw)
+                if (delta.isEmpty()) return@post
                 shown.append(delta)
                 showLive()
                 if (voice) {
@@ -515,11 +628,11 @@ object Assistant {
 
         scope.launch {
             var failure: String? = null
-            val reply = try {
+            val rawReply = try {
                 withContext(Ai.thread) {
                     try {
                         if (reset) brain.reset(systemPrompt, history)
-                        brain.askStreaming(prompt, image, onChunk)
+                        brain.askStreaming(prompt, image, onChunk).also { GpuGuard.answered(app) }
                     } catch (e: Exception) {
                         if (!Brain.isFull(e)) throw e
                         // La conversación ya no cabe: empieza de cero (la memoria se conserva) y lo intenta otra vez.
@@ -549,6 +662,7 @@ object Assistant {
                     return@post
                 }
                 // Si el modelo escribió la herramienta como texto en vez de usarla, se hace por él.
+                val reply = Thinking.strip(rawReply)
                 val written = WrittenCalls.handle(app, reply)
                 val finalText = when {
                     written != null -> (written.remainingText + "\n\n" + written.done.joinToString(" ")).trim()
@@ -559,6 +673,10 @@ object Assistant {
                 shown.append(finalText)
                 showLive()
                 status = ""
+                afterNote?.let { status = it }
+                afterNote = null
+                if (failed == null && finalText.isNotBlank()) TrainingLog.add(app, text, finalText, "local")
+                Learner.afterReply()
                 if (voice) {
                     if (written != null) {
                         unspoken.clear()
@@ -574,6 +692,49 @@ object Assistant {
                     onDone?.invoke()
                 }
             }
+        }
+    }
+
+
+    /**
+     * Primero consigue datos ([fetch]: internet o sus documentos, fuera del hilo principal) y luego
+     * le pasa al modelo la pregunta junto con ellos, para que conteste con fuentes y sin inventar.
+     */
+    private fun retrieveThenAsk(text: String, history: List<Turn>, onDone: (() -> Unit)?, working: String, fetch: () -> String?) {
+        if (Ai.brain == null) return say("Todavía me estoy despertando. Dame un momento.", onDone)
+        thinking = true
+        status = working
+        scope.launch {
+            val prompt = runCatching { withContext(Dispatchers.IO) { fetch() } }.getOrNull()
+            thinking = false
+            if (prompt == null) {
+                say("No encontré nada (¿hay conexión a internet?). Te contesto con lo que sé, puede que no esté al día.", onDone = {
+                    askModel(text, text, null, history, onDone)
+                })
+                return@launch
+            }
+            askModel(text, prompt, null, history, onDone)
+        }
+    }
+
+    /** Modo experto: solo cuando Maurizio lo pide. Pregunta al modelo grande en la nube. */
+    private fun askExpert(question: String, history: List<Turn>, onDone: (() -> Unit)?) {
+        Expert.notReady(app)?.let { return say(it, onDone) }
+        thinking = true
+        status = "Consultando al experto en la nube…"
+        val systemPrompt = memory.systemPrompt()
+        scope.launch {
+            val answer = runCatching { withContext(Dispatchers.IO) { Expert.ask(app, systemPrompt, history, question) } }
+            thinking = false
+            answer.fold(
+                onSuccess = {
+                    TrainingLog.add(app, question, it, "experto")
+                    // Que Ultra en el teléfono también sepa lo que contestó el experto.
+                    brainDirty = true
+                    say("🎓 $it", onDone)
+                },
+                onFailure = { say("El experto no pudo contestar: ${it.message}", onDone) },
+            )
         }
     }
 
@@ -670,6 +831,7 @@ object Assistant {
 
     fun newChat() {
         stopSpeaking()
+        Learner.review(turns.toList())
         turns.clear()
         SelfEdits.pending.value = null
         brainDirty = true

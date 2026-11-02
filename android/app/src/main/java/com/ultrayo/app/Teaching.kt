@@ -34,8 +34,10 @@ object Teaching {
         }
         if (whatYouKnow.containsMatchIn(t)) {
             val facts = memory.facts()
-            return if (facts.isEmpty()) "Todavía no me has enseñado nada. Dime \"recuerda que\" y lo que quieras."
-            else "Esto es lo que me has enseñado: " + facts.joinToString(". ")
+            val learned = memory.learnedCount()
+            val extra = if (learned > 0) " Además he aprendido $learned cosas por mi cuenta; las ves y las borras en Ajustes, en Lo que ha aprendido." else ""
+            return if (facts.isEmpty()) "Todavía no me has enseñado nada. Dime \"recuerda que\" y lo que quieras.$extra"
+            else "Esto es lo que me has enseñado: " + facts.joinToString(". ") + extra
         }
         return null
     }
