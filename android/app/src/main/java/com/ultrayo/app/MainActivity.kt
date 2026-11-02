@@ -386,7 +386,7 @@ class MainActivity : ComponentActivity() {
                     file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
                     file.path
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 status = "No pude abrir la foto: ${e.message}"
                 return@launch
             }
@@ -415,7 +415,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val text = try {
                 withContext(Dispatchers.IO) { DocReader.read(this@MainActivity, uri, name, type) }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 status = "No pude leer \"$name\": ${e.message}"
                 return@launch
             }
@@ -430,7 +430,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val summary = try {
                 withContext(Dispatchers.IO) { Archives.extract(this@MainActivity, uri, name).second }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 status = "No pude descomprimir \"$name\": ${e.message}"
                 return@launch
             }

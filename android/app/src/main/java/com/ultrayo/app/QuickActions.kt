@@ -58,6 +58,10 @@ object QuickActions {
                 ?: openApp(c, text)
         } catch (e: SecurityException) {
             "Me falta un permiso para eso. Ábreme y te lo pido."
+        } catch (e: Exception) {
+            // Una app que no está, un dato raro del sistema…: se apunta y se dice, sin cerrar la app.
+            ErrorLog.add("Fallo en la orden rápida \"${text.take(80)}\"", e)
+            "No pude hacerlo: ${Safe.describe(e)}."
         }
     }
 

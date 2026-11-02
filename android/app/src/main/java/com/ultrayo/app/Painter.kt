@@ -86,7 +86,10 @@ object Painter {
         sizeMb = 1190,
     )
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, e -> ErrorLog.add("Fallo del motor de imágenes", e) },
+    )
     private val lock = Mutex()
     private var process: Process? = null
     private var running: PaintModel? = null
