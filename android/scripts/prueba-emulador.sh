@@ -53,5 +53,11 @@ if grep -A2 "FATAL EXCEPTION" "$OUT/logcat.txt" | grep -q "Process: $PKG"; then
 fi
 adb pull /sdcard/Android/data/$PKG/files/prueba "$OUT/" >/dev/null 2>&1 || true
 adb shell run-as $PKG cat files/registro-errores.txt > "$OUT/registro-errores.txt" 2>/dev/null || true
+echo "== Lo que contestó Ultra =="
+cat "$OUT/prueba/respuestas.txt" 2>/dev/null || echo "(sin respuestas)"
+echo "== Registro de errores de la app (fallos capturados, sin cierre) =="
+cat "$OUT/registro-errores.txt" 2>/dev/null | head -150 || true
+echo "== Final de monkey =="
+tail -5 "$OUT/monkey.txt"
 echo "Resultados en $OUT"
 exit $fail
