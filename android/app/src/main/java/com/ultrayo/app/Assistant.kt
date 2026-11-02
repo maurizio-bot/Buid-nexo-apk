@@ -676,9 +676,9 @@ object Assistant {
             val prompt = runCatching { withContext(Dispatchers.IO) { fetch() } }.getOrNull()
             thinking = false
             if (prompt == null) {
-                say("No encontré nada (¿hay conexión a internet?). Te contesto con lo que sé, puede que no esté al día.") {
+                say("No encontré nada (¿hay conexión a internet?). Te contesto con lo que sé, puede que no esté al día.", onDone = {
                     askModel(text, text, null, history, onDone)
-                }
+                })
                 return@launch
             }
             askModel(text, prompt, null, history, onDone)
