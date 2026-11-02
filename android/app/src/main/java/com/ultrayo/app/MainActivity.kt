@@ -128,6 +128,24 @@ class MainActivity : ComponentActivity() {
     private var attachment by mutableStateOf<Attachment?>(null)
     private var wakeOn by mutableStateOf(false)
 
+    private var controlOn by mutableStateOf(false)
+    private var phoneAccess by mutableStateOf(false)
+
+    private val phonePermissions = arrayOf(
+        Manifest.permission.READ_CONTACTS,
+        Manifest.permission.CALL_PHONE,
+        Manifest.permission.SEND_SMS,
+    )
+
+    private val askPhone = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        Control.permissionsNeeded = emptyList()
+        phoneAccess = hasPhonePermissions()
+    }
+
+    private fun hasPhonePermissions() = phonePermissions.all {
+        ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+    }
+
     private var folders by mutableStateOf<List<Uri>>(emptyList())
     private var mediaAccess by mutableStateOf(false)
 
@@ -194,6 +212,8 @@ class MainActivity : ComponentActivity() {
         locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
         wakeOn = UltraService.instance != null
         mediaAccess = DeviceFiles.hasMedia(this)
+        controlOn = UltraAccessibility.instance != null
+        phoneAccess = hasPhonePermissions()
         if (brainReady) maybeStartWake()
         // Con el teléfono bloqueado (abierta con el botón lateral) empieza a escuchar sola.
         if (locked && brainReady && hasMicPermission() && !listening && !thinking) listenNow()
@@ -408,6 +428,11 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun Screen() {
         var showMemory by remember { mutableStateOf(false) }
+        // Una orden necesitó un permiso (contactos, llamar, SMS): pedirlo en cuanto se pueda.
+        val needed = Control.permissionsNeeded
+        LaunchedEffect(needed, locked) {
+            if (needed.isNotEmpty() && !locked) askPhone.launch(needed.toTypedArray())
+        }
         Column(
             Modifier
                 .fillMaxSize()
@@ -605,6 +630,12 @@ class MainActivity : ComponentActivity() {
             if (shownStatus.isNotBlank()) {
                 Text(shownStatus, color = UltraColors.Muted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
             }
+            if (Assistant.speaking || thinking || Control.acting) {
+                TextButton(onClick = { Control.stop() }) {
+                    Text("■  Parar", color = Color(0xFFFF6E6E), fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Control.pending?.let { PendingActionCard(it) }
             SelfEdits.pending.value?.let { if (!locked) SelfChangeCard(it) }
             attachment?.let { AttachmentChip(it) }
             InputBar()
@@ -748,6 +779,7 @@ class MainActivity : ComponentActivity() {
         var voiceReplies by remember { mutableStateOf(memory.voiceReplies) }
 
         LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item { ControlCard() }
             item {
                 Card {
                     SectionTitle("Voz")
@@ -1106,6 +1138,79 @@ class MainActivity : ComponentActivity() {
                     checkedTrackColor = UltraColors.Accent,
                 ),
             )
+        }
+    }
+
+    /** Una acción en el teléfono que espera el "sí" de Maurizio. También vale decir "sí" o "no" en voz alta. */
+    @Composable
+    private fun PendingActionCard(action: PendingAction) {
+        Column(
+            Modifier
+                .padding(bottom = 8.dp)
+                .fillMaxWidth()
+                .glass()
+                .border(1.dp, UltraColors.AccentBright, RoundedCornerShape(20.dp))
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SectionTitle("¿Lo hago?", action.plan)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                GlowButton("Sí, hazlo", onClick = { Assistant.say(Control.confirm()) })
+                TextButton(onClick = { Assistant.say(Control.cancel()) }) { Text("No") }
+            }
+        }
+    }
+
+    /** Activar el control del teléfono, sus permisos y el registro de lo que ha hecho. */
+    @Composable
+    private fun ControlCard() {
+        var showLog by remember { mutableStateOf(false) }
+        Card {
+            SectionTitle(
+                "Control del teléfono",
+                "Dile \"abre WhatsApp\", \"llama a mamá\", \"manda un whatsapp a Juan que llego tarde\", \"pon una alarma a las 7\", " +
+                    "\"temporizador de 10 minutos\", \"llévame a casa\", \"linterna\", \"sube el volumen\", \"atrás\", \"pulsa Aceptar\" o \"lee la pantalla\". " +
+                    "Lo directo se hace al instante; lo que envía, llama, paga o borra espera tu sí. Di \"para\" o pulsa PARAR para cortarlo.",
+            )
+            Text(
+                if (controlOn) "✓ Puede pulsar, escribir y leer la pantalla en tus apps." else "Sin activar: solo puede abrir apps y hacer acciones directas.",
+                color = if (controlOn) UltraColors.Accent else UltraColors.Muted,
+                fontSize = 13.sp,
+            )
+            if (!controlOn) {
+                Text(
+                    "En Accesibilidad, entra en Aplicaciones instaladas > Ultra Yo y actívalo. Si sale gris (\"ajuste restringido\"), " +
+                        "ve a Ajustes > Aplicaciones > Ultra Yo, toca ⋮ arriba a la derecha > Permitir ajustes restringidos, y vuelve.",
+                    color = UltraColors.Muted,
+                    fontSize = 12.sp,
+                )
+                GlowButton("Activar control del teléfono", onClick = { UltraAccessibility.openSettings(this@MainActivity) }, Modifier.fillMaxWidth())
+            }
+            if (!phoneAccess) {
+                GlowButton("Permitir contactos, llamadas y SMS", onClick = { askPhone.launch(phonePermissions) }, Modifier.fillMaxWidth())
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { showLog = !showLog }) {
+                    Text(if (showLog) "Ocultar registro" else "Ver lo que ha hecho (${Control.logLines.size})")
+                }
+                if (showLog && Control.logLines.isNotEmpty()) {
+                    TextButton(onClick = { Control.clearLog() }) { Text("Borrar registro") }
+                }
+            }
+            if (showLog) {
+                Text(
+                    Control.logLines.takeLast(60).reversed().joinToString("\n").ifEmpty { "Todavía no ha hecho nada." },
+                    color = UltraColors.Text,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 260.dp)
+                        .glass(12.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(10.dp),
+                )
+            }
         }
     }
 

@@ -132,6 +132,14 @@ class Memory(context: Context) {
     fun systemPrompt(): String = buildString {
         append(personality)
         append(
+            "\n\nEres la interfaz del teléfono de Maurizio, como Jarvis: ágil y directo. Contesta corto y natural, " +
+                "una o dos frases habladas, sin listas ni títulos, salvo que te pida detalle. Cuando te pida hacer algo en " +
+                "el teléfono, hazlo con tus herramientas en vez de explicarle cómo: accionTelefono para llamar, mensajes, " +
+                "alarmas, temporizadores, Maps, música, linterna o volumen; y dentro de cualquier app, leerPantalla, pulsar, " +
+                "escribirEnPantalla, desplazar y botonSistema. Nunca hagas nada en el teléfono que no te haya pedido. Lo que " +
+                "envía, paga, llama o borra lo confirma él con un sí: dile en una frase lo que vas a hacer."
+        )
+        append(
             "\n\nPuedes usar herramientas para ver qué apps hay en el teléfono y abrirlas; para buscar fotos, vídeos, " +
                 "audios y documentos del teléfono, enseñarlos en pantalla y leer documentos (txt, pdf, doc, docx, xlsx…); " +
                 "y para pasarle una pregunta a Claude abriendo su app. Con los archivos solo puedes leer: no puedes " +
