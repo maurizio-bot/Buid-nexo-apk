@@ -191,7 +191,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Assistant.init(this)
+        val nativeExit = ErrorLog.checkLastExit(this)
         lastCrash = App.crashFile(this).takeIf { it.exists() }?.readText()
+            ?: nativeExit?.let { "$it\nEl registro completo está en Ajustes > Registro de errores." }
         folders = Folders.list(this)
         mediaAccess = DeviceFiles.hasMedia(this)
         downloader = ModelDownloader(this)
@@ -820,6 +822,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             item { PainterCard() }
+            item { ErrorLogCard() }
             if (canUndo) {
                 item {
                     Card {
@@ -1163,6 +1166,35 @@ class MainActivity : ComponentActivity() {
                     }) { Text("Probar") }
                     TextButton(onClick = { editing = null }) { Text("Cancelar") }
                 }
+            }
+        }
+    }
+
+    /** Registro de errores: lo que falló (sin cerrar la app) y por qué se cerró, para copiarlo y mandarlo. */
+    @Composable
+    private fun ErrorLogCard() {
+        val clipboard = LocalClipboardManager.current
+        var log by remember { mutableStateOf(ErrorLog.read()) }
+        var open by remember { mutableStateOf(false) }
+        Card {
+            SectionTitle(
+                "Registro de errores",
+                "Si algo falla o la app se cierra, aquí queda apuntado. Cópialo y mándaselo a Claude.",
+            )
+            if (log.isBlank()) {
+                Text("No hay errores apuntados.", color = UltraColors.Muted, fontSize = 13.sp)
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    GlowButton("Copiar", onClick = {
+                        clipboard.setText(AnnotatedString("Ultra Yo ${packageManager.getPackageInfo(packageName, 0).versionName}\n$log"))
+                    })
+                    TextButton(onClick = { open = !open }) { Text(if (open) "Ocultar" else "Ver") }
+                    TextButton(onClick = {
+                        ErrorLog.clear()
+                        log = ""
+                    }) { Text("Borrar") }
+                }
+                if (open) Text(log.takeLast(4000), color = UltraColors.Muted, fontSize = 12.sp)
             }
         }
     }

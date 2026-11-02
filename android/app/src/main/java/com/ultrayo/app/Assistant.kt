@@ -854,8 +854,9 @@ object Assistant {
                         brain.askStreaming(prompt.take(MAX_PROMPT), image, onChunk)
                     }
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 brainDirty = true
+                if (!Brain.isFull(e)) ErrorLog.add("Fallo al contestar", e)
                 failure = if (Brain.isFull(e)) {
                     "Eso es demasiado largo para leerlo de una vez. Pídeme una parte concreta, por ejemplo un archivo de dentro."
                 } else {
