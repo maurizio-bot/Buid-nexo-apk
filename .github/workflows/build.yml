@@ -23,6 +23,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Traer el motor de imágenes
         run: ./scripts/motor-imagenes.sh
+      - name: Traer el motor de voz
+        run: ./scripts/motor-voz.sh
       - run: ./gradlew assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:

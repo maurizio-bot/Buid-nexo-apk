@@ -171,9 +171,14 @@ class UltraService : Service() {
 
     // --- Escuchar una frase ---
 
-    /** Intenta el reconocedor de Android (mejor) y, si no puede usar el micrófono, el de Vosk. */
+    /**
+     * Usa el oído rápido si está (dentro del teléfono, en streaming); si no, el reconocedor de Android y,
+     * si este no puede usar el micrófono desde aquí, el de Vosk.
+     */
     private val ear = Ear { onHeard, onNothing, onFailed ->
-        if (useVoskEar) {
+        if (Assistant.bestEar() === Assistant.neuralEar) {
+            Assistant.neuralEar.listen(onHeard, onNothing, onFailed)
+        } else if (useVoskEar) {
             voskEar.listen(onHeard, onNothing, onFailed)
         } else {
             Assistant.androidEar.listen(onHeard, onNothing) { error ->
