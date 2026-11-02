@@ -9,8 +9,10 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        ErrorLog.init(this)
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            ErrorLog.add("La app se cerró por un fallo (hilo ${thread.name})", error)
             runCatching {
                 crashFile(this).writeText(
                     "Ultra Yo ${BuildConfigInfo.version(this)}\n${error.stackTraceToString()}"

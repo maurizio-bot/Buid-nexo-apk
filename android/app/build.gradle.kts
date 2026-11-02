@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.17.0"
+        versionCode = 24
+        versionName = "0.17.1"
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior
@@ -69,6 +69,8 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
+    // Para pasarle al modelo los datos de las herramientas (ya venía dentro de LiteRT-LM)
+    implementation("com.google.code.gson:gson:2.11.0")
     // Motor de habilidades programadas: JavaScript interpretado dentro de la app
     implementation("org.mozilla:rhino:1.7.15")
     // Leer el texto de los PDF

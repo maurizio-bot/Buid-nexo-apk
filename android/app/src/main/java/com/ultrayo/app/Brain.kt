@@ -9,8 +9,13 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.ToolCall
+import com.google.ai.edge.litertlm.ToolManager
 import com.google.ai.edge.litertlm.ToolSet
 import com.google.ai.edge.litertlm.tool
+import com.google.gson.Gson
+import com.google.gson.JsonElement
+import kotlinx.coroutines.CancellationException
 
 /** Un mensaje del chat. [image] es la ruta de una foto adjunta y [fileName] el nombre de un archivo adjunto. */
 data class Turn(val role: String, val content: String, val image: String? = null, val fileName: String? = null)
@@ -27,6 +32,15 @@ class Brain(
 
     private var engine: Engine? = null
     private var conversation: Conversation? = null
+
+    /**
+     * Las herramientas las ejecuta Ultra Yo, no el motor. Si las ejecuta el motor, lo hace dentro
+     * de su propio hilo nativo y cualquier fallo (un archivo raro, una respuesta demasiado larga
+     * para la memoria del modelo…) cierra la app de golpe sin dejar rastro. Así, un fallo de una
+     * herramienta se convierte en un mensaje para el modelo y en una línea del registro de errores.
+     */
+    private val toolManager = ToolManager(tools.map { tool(it) })
+    private val gson = Gson()
 
     /**
      * Carga el modelo. Con [useGpu] lo intenta primero en la GPU, que empieza a contestar
@@ -102,42 +116,86 @@ class Brain(
                     if (it.role == "user") Message.user(it.content) else Message.model(it.content)
                 },
                 tools = tools.map { tool(it) },
+                automaticToolCalling = false,
             )
         )
     }
 
     fun ask(text: String, imagePath: String? = null): String {
         val conversation = checkNotNull(conversation) { "No hay conversación" }
-        val reply = if (imagePath != null && visionEnabled) {
-            conversation.sendMessage(Contents.of(Content.ImageFile(imagePath), Content.Text(text)))
-        } else {
-            conversation.sendMessage(text)
+        var message = firstMessage(text, imagePath)
+        repeat(MAX_TOOL_ROUNDS) {
+            val reply = conversation.sendMessage(message)
+            if (reply.toolCalls.isEmpty()) return reply.toString().trim()
+            message = runTools(reply.toolCalls)
         }
-        return reply.toString().trim()
+        return "Hice demasiadas consultas seguidas sin llegar a una respuesta."
     }
 
     /**
      * Como [ask], pero va entregando la respuesta a trozos según el modelo la escribe, para que
      * Ultra Yo empiece a hablar sin esperar al final. Devuelve la respuesta completa.
+     * Si el modelo pide herramientas, se ejecutan aquí y se le devuelve el resultado.
      */
     suspend fun askStreaming(text: String, imagePath: String? = null, onChunk: (String) -> Unit): String {
         val conversation = checkNotNull(conversation) { "No hay conversación" }
-        val flow = if (imagePath != null && visionEnabled) {
-            conversation.sendMessageAsync(Contents.of(Content.ImageFile(imagePath), Content.Text(text)))
-        } else {
-            conversation.sendMessageAsync(Contents.of(text))
-        }
+        var message = firstMessage(text, imagePath)
         val full = StringBuilder()
-        flow.collect { message ->
-            val piece = message.toString()
-            // Por si el motor entrega el texto acumulado en vez de solo lo nuevo.
-            val delta = if (full.isNotEmpty() && piece.length > full.length && piece.startsWith(full)) piece.substring(full.length) else piece
-            if (delta.isNotEmpty()) {
-                full.append(delta)
-                onChunk(delta)
+        repeat(MAX_TOOL_ROUNDS) {
+            val calls = mutableListOf<ToolCall>()
+            val round = StringBuilder()
+            conversation.sendMessageAsync(message).collect { reply ->
+                calls += reply.toolCalls
+                val piece = reply.toString()
+                // Por si el motor entrega el texto acumulado en vez de solo lo nuevo.
+                val delta = if (round.isNotEmpty() && piece.length > round.length && piece.startsWith(round)) piece.substring(round.length) else piece
+                if (delta.isNotEmpty()) {
+                    round.append(delta)
+                    full.append(delta)
+                    onChunk(delta)
+                }
             }
+            if (calls.isEmpty()) return full.toString().trim()
+            message = runTools(calls)
         }
-        return full.toString().trim()
+        return full.toString().trim().ifBlank { "Hice demasiadas consultas seguidas sin llegar a una respuesta." }
+    }
+
+    private fun firstMessage(text: String, imagePath: String?): Message =
+        if (imagePath != null && visionEnabled) {
+            Message.user(Contents.of(Content.ImageFile(imagePath), Content.Text(text)))
+        } else {
+            Message.user(text)
+        }
+
+    /** Ejecuta lo que pidió el modelo. Pase lo que pase, devuelve una respuesta y la app sigue. */
+    private fun runTools(calls: List<ToolCall>): Message {
+        val responses = calls.map { call ->
+            ErrorLog.step("herramienta ${call.name} ${call.arguments}".take(300))
+            val result = try {
+                val args = gson.toJsonTree(call.arguments).asJsonObject
+                plain(toolManager.execute(call.name, args)).also {
+                    if (it.startsWith("Error occured")) ErrorLog.add("Herramienta ${call.name} falló: $it".take(1500))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                ErrorLog.add("Herramienta ${call.name} ${call.arguments}".take(300), e)
+                "Error: ${e.javaClass.simpleName} ${e.message.orEmpty()}".take(300)
+            }
+            ErrorLog.stepDone()
+            val short = if (result.length > MAX_TOOL_RESULT) result.take(MAX_TOOL_RESULT) + "\n[… cortado: era demasiado largo]" else result
+            Content.ToolResponse(call.name, short)
+        }
+        return Message.tool(Contents.of(responses))
+    }
+
+    /** El resultado de una herramienta como texto simple (las listas, una línea por cosa). */
+    private fun plain(element: JsonElement): String = when {
+        element.isJsonNull -> ""
+        element.isJsonPrimitive -> element.asString
+        element.isJsonArray -> element.asJsonArray.joinToString("\n") { plain(it) }
+        else -> element.toString()
     }
 
     /**
@@ -163,6 +221,12 @@ class Brain(
 
     companion object {
         const val MAX_TOKENS = 8192
+
+        /** Cuántas veces seguidas puede usar herramientas antes de contestar. */
+        const val MAX_TOOL_ROUNDS = 8
+
+        /** Lo máximo que se le devuelve de una herramienta, para que quepa en su memoria. */
+        const val MAX_TOOL_RESULT = 3600
 
         /** Si el error es que la conversación ya no cabe en la memoria del modelo. */
         fun isFull(e: Throwable): Boolean {
