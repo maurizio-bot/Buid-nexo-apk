@@ -7,10 +7,6 @@ import com.google.ai.edge.litertlm.ToolSet
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLDecoder
-import java.net.URLEncoder
 import java.text.Normalizer
 import java.util.Locale
 import kotlin.math.ln
@@ -35,6 +31,40 @@ class KnowledgeTools(context: Context) : ToolSet {
         @ToolParam(description = "El enlace completo, empezando por https://") enlace: String,
     ): String = runCatching { WebSearch.read(enlace) }.getOrElse { "No pude leer la página: ${it.message}" }
 
+    @Tool(description = "Busca en internet y lee las mejores páginas a la vez; devuelve los párrafos útiles con su enlace. Úsala para preguntas que piden una respuesta completa y actual.")
+    fun investigarWeb(
+        @ToolParam(description = "Lo que hay que averiguar") consulta: String,
+    ): String = WebSearch.readTop(consulta, pages = 3).ifBlank { "No encontré nada o no hay conexión a internet." }
+
+    @Tool(description = "El tiempo que hace y la previsión de hoy y mañana en una ciudad.")
+    fun tiempo(
+        @ToolParam(description = "La ciudad; vacío para la última que pidió Maurizio") lugar: String,
+    ): String = runCatching { LiveInfo.weather(context, lugar.ifBlank { null }, tomorrow = false) }.getOrElse { "No pude ver el tiempo: ${it.message}" }
+
+    @Tool(description = "Convierte dinero de una moneda a otra con el cambio oficial del día (Banco Central Europeo).")
+    fun cambioMoneda(
+        @ToolParam(description = "La cantidad, por ejemplo 100") cantidad: String,
+        @ToolParam(description = "Moneda de origen: código (USD) o nombre (dólares)") de: String,
+        @ToolParam(description = "Moneda de destino: código (EUR) o nombre (euros)") a: String,
+    ): String = runCatching {
+        LiveInfo.currency(cantidad.replace(',', '.').toDouble(), LiveInfo.currencyCode(de) ?: de.uppercase(), LiveInfo.currencyCode(a) ?: a.uppercase())
+    }.getOrElse { "No pude convertirlo: ${it.message}" }
+
+    @Tool(description = "Los últimos titulares de noticias, en general o sobre un tema.")
+    fun noticias(
+        @ToolParam(description = "El tema; vacío para las noticias principales") tema: String,
+    ): String = runCatching { LiveInfo.news(tema.ifBlank { null }) }.getOrElse { "No pude ver las noticias: ${it.message}" }
+
+    @Tool(description = "El resumen de Wikipedia sobre un tema, persona o lugar.")
+    fun wikipedia(
+        @ToolParam(description = "El tema, persona o lugar") tema: String,
+    ): String = runCatching { LiveInfo.wiki(tema) }.getOrElse { "No lo encontré en Wikipedia: ${it.message}" }
+
+    @Tool(description = "Busca en lo que has aprendido de Maurizio y por tu cuenta (recuerdos, reglas, investigaciones), por parecido.")
+    fun recordar(
+        @ToolParam(description = "De qué se trata") tema: String,
+    ): String = Recall.get(context).relevant(tema, k = 6).joinToString("\n") { "- ${it.text}" }.ifEmpty { "No recuerdo nada sobre eso." }
+
     @Tool(description = "Hace una cuenta exacta. Úsala siempre que haya números en vez de calcular de cabeza. Admite + - * / ^ %, paréntesis, raiz, sin, cos, tan, log, ln, abs, redondear, pi y e.")
     fun calcular(
         @ToolParam(description = "La expresión, por ejemplo (1200*0.21)+35 o raiz(2)") expresion: String,
@@ -48,85 +78,6 @@ class KnowledgeTools(context: Context) : ToolSet {
         if (Assistant.locked()) return "El teléfono está bloqueado: no puedo mirar sus documentos."
         return DocIndex.formatted(context, pregunta)
     }
-}
-
-/** Búsqueda web gratuita: DuckDuckGo (versión HTML) y, si no da nada, Wikipedia. */
-object WebSearch {
-
-    private const val AGENT = "Mozilla/5.0 (Linux; Android 14) UltraYo"
-
-    fun search(query: String, limit: Int = 5): List<String> {
-        val ddg = runCatching { duckDuckGo(query, limit) }.getOrDefault(emptyList())
-        if (ddg.isNotEmpty()) return ddg
-        return runCatching { wikipedia(query, limit) }.getOrDefault(emptyList())
-    }
-
-    private fun duckDuckGo(query: String, limit: Int): List<String> {
-        val html = get("https://html.duckduckgo.com/html/?kl=es-es&q=" + URLEncoder.encode(query, "UTF-8"))
-        val links = Regex("<a[^>]+class=\"result__a\"[^>]+href=\"([^\"]+)\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL).findAll(html).toList()
-        val snippets = Regex("class=\"result__snippet\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL).findAll(html).map { clean(it.groupValues[1]) }.toList()
-        return links.take(limit).mapIndexed { i, m ->
-            var href = m.groupValues[1].replace("&amp;", "&")
-            Regex("uddg=([^&]+)").find(href)?.let { href = URLDecoder.decode(it.groupValues[1], "UTF-8") }
-            if (href.startsWith("//")) href = "https:$href"
-            "${i + 1}. ${clean(m.groupValues[2])} — $href\n   ${snippets.getOrElse(i) { "" }}"
-        }.filterNot { it.contains("duckduckgo.com/y.js") }
-    }
-
-    private fun wikipedia(query: String, limit: Int): List<String> {
-        val url = "https://es.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1&srlimit=$limit&srsearch=" +
-            URLEncoder.encode(query, "UTF-8")
-        val results = JSONObject(get(url)).getJSONObject("query").getJSONArray("search")
-        return List(results.length()) { i ->
-            val r = results.getJSONObject(i)
-            val title = r.getString("title")
-            "${i + 1}. $title (Wikipedia) — https://es.wikipedia.org/wiki/${URLEncoder.encode(title.replace(' ', '_'), "UTF-8")}\n   ${clean(r.optString("snippet"))}"
-        }
-    }
-
-    /** El texto legible de una página, recortado para que quepa en la conversación. */
-    fun read(url: String, limit: Int = 3500): String {
-        require(url.startsWith("http://") || url.startsWith("https://")) { "el enlace tiene que empezar por https://" }
-        val text = clean(
-            get(url)
-                .replace(Regex("<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\\1>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), " ")
-                .replace(Regex("<(br|p|div|li|h[1-6]|tr)[^>]*>", RegexOption.IGNORE_CASE), "\n")
-        )
-        return text.lines().map { it.trim() }.filter { it.length > 1 }.joinToString("\n").take(limit).ifBlank { "La página no tiene texto que pueda leer." }
-    }
-
-    private fun get(url: String): String {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 7000
-        c.readTimeout = 9000
-        c.instanceFollowRedirects = true
-        c.setRequestProperty("User-Agent", AGENT)
-        c.setRequestProperty("Accept-Language", "es-ES,es;q=0.9")
-        try {
-            if (c.responseCode !in 200..299) error("la web respondió ${c.responseCode}")
-            return c.inputStream.bufferedReader().use { r ->
-                val buf = CharArray(400_000)
-                var n = 0
-                while (n < buf.size) {
-                    val read = r.read(buf, n, buf.size - n)
-                    if (read < 0) break
-                    n += read
-                }
-                String(buf, 0, n)
-            }
-        } finally {
-            c.disconnect()
-        }
-    }
-
-    private fun clean(html: String): String = html
-        .replace(Regex("<[^>]+>"), "")
-        .replace("&nbsp;", " ").replace("&amp;", "&").replace("&quot;", "\"").replace("&#x27;", "'").replace("&#39;", "'")
-        .replace("&lt;", "<").replace("&gt;", ">")
-        .replace(Regex("&#(\\d+);")) { m -> m.groupValues[1].toIntOrNull()?.let { String(Character.toChars(it)) } ?: "" }
-        .replace(Regex("[ \\t\\x0B\\f\\r]+"), " ")
-        .replace(Regex("\\n\\s*\\n+"), "\n")
-        .trim()
 }
 
 /** Calculadora exacta (no se equivoca como el modelo al hacer cuentas de cabeza). */

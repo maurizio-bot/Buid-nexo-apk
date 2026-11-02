@@ -99,6 +99,8 @@ object Assistant {
         if (::app.isInitialized) return
         app = context.applicationContext
         memory = Memory(app)
+        WebCache.init(app)
+        Learner.init(app)
         Control.init(app)
         brainReady = Ai.brain != null
         tts = TextToSpeech(app) { result ->
@@ -166,6 +168,9 @@ object Assistant {
             }
         }
     }
+
+    /** Un aviso corto para enseñar al terminar la respuesta (por ejemplo "Apuntado para la próxima vez"). */
+    private var afterNote: String? = null
 
     /** El cerebro cargado ahora (para enseñarlo en Ajustes). */
     var brainModel by mutableStateOf<BrainModel?>(null)
@@ -457,12 +462,12 @@ object Assistant {
             webRequest.find(command)?.let { match ->
                 val query = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }.orEmpty().trim()
                 if (query.length > 1) {
-                    retrieveThenAsk(text, history, onDone, "Buscando en internet…") {
-                        val results = WebSearch.search(query)
-                        if (results.isEmpty()) null
-                        else "Resultados de internet para \"$query\":\n${results.joinToString("\n")}\n\n" +
-                            "Pregunta de Maurizio: $text\n\nContesta con lo que dicen estos resultados, sin inventar nada que no esté en " +
-                            "ellos, y di de qué web sale. Si no bastan, dilo y usa leerWeb con el enlace más prometedor."
+                    retrieveThenAsk(text, history, onDone, "Buscando y leyendo en internet…") {
+                        val pages = WebSearch.readTop(query, pages = 3)
+                        if (pages.isBlank()) null
+                        else "Lo que dicen las mejores páginas sobre \"$query\":\n$pages\n\n" +
+                            "Pregunta de Maurizio: $text\n\nContesta resumiendo lo que dicen estas páginas, sin inventar nada que no esté en " +
+                            "ellas, y di de qué web sale lo importante. Si no bastan o se contradicen, dilo."
                     }
                     return
                 }
@@ -474,6 +479,23 @@ object Assistant {
                         "Contesta solo con lo que digan esos fragmentos y cita el archivo entre paréntesis, por ejemplo (según factura.pdf). " +
                         "Si no está ahí, dilo claro en vez de inventarlo."
                 }
+                return
+            }
+            // El tiempo, la moneda, las noticias y Wikipedia: directos, sin buscador ni modelo.
+            LiveInfo.direct(app, command)?.let { work ->
+                thinking = true
+                status = "Mirándolo…"
+                scope.launch {
+                    val answer = runCatching { withContext(Dispatchers.IO) { work() } }
+                        .getOrElse { "No pude consultarlo (¿hay conexión a internet?): ${it.message}" }
+                    thinking = false
+                    say(answer, onDone)
+                }
+                return
+            }
+            Learner.researchTopic(command)?.let { topic ->
+                say("Me pongo a investigar \"$topic\" en segundo plano. Te aviso cuando termine; mientras, puedo tardar algo más en contestar.", onDone)
+                Learner.research(topic) { notify(it) }
                 return
             }
             // Llamadas a herramientas pegadas o escritas a mano, y "crea una habilidad llamada X: …"
@@ -529,6 +551,7 @@ object Assistant {
         } else {
             text
         }
+        afterNote = Learner.maybeCorrection(text, history)
         askModel(text, prompt, attached?.imagePath, history, onDone)
     }
 
@@ -547,8 +570,14 @@ object Assistant {
             say("Todavía no puedo ver fotos en este teléfono. Si quieres, descríbemela con palabras.", onDone)
             return
         }
+        Learner.beforeAsk()
         val deep = Thinking.isHard(text)
-        val prompt = if (deep) Thinking.wrap(prompt0) else prompt0
+        // Lo aprendido que viene al caso (lo importante ya va siempre en las instrucciones).
+        val always = runCatching { Recall.get(app).alwaysOn().map { it.id }.toSet() }.getOrDefault(emptySet())
+        val related = runCatching { Recall.get(app).relevant(text, k = 4, exclude = always) }.getOrDefault(emptyList())
+        val withMemory = if (related.isEmpty()) prompt0
+        else "[Cosas que aprendiste antes y pueden venir al caso:\n${related.joinToString("\n") { "- " + it.text }}]\n\n$prompt0"
+        val prompt = if (deep) Thinking.wrap(withMemory) else withMemory
         thinking = true
         status = if (deep) "Pensando a fondo…" else "Pensando…"
         val reset = brainDirty
@@ -644,7 +673,10 @@ object Assistant {
                 shown.append(finalText)
                 showLive()
                 status = ""
+                afterNote?.let { status = it }
+                afterNote = null
                 if (failed == null && finalText.isNotBlank()) TrainingLog.add(app, text, finalText, "local")
+                Learner.afterReply()
                 if (voice) {
                     if (written != null) {
                         unspoken.clear()
@@ -799,6 +831,7 @@ object Assistant {
 
     fun newChat() {
         stopSpeaking()
+        Learner.review(turns.toList())
         turns.clear()
         SelfEdits.pending.value = null
         brainDirty = true

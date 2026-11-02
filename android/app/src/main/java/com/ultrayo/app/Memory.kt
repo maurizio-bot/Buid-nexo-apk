@@ -15,6 +15,8 @@ no uses listas, tablas, asteriscos ni bloques de código."""
 /** Lo que Maurizio le enseña a su IA. Se guarda en su carpeta del teléfono (memoria.json, ver [Vault]). */
 class Memory(context: Context) {
 
+    private val appContext = context.applicationContext
+
     private val prefs = VaultPrefs.memory(context)
     private val folder = Vault.path(context)
 
@@ -31,6 +33,9 @@ class Memory(context: Context) {
     var wakeWord: Boolean
         get() = prefs.getBoolean("wake_word", true)
         set(value) = prefs.edit().putBoolean("wake_word", value).apply()
+
+    /** Cuántas cosas ha aprendido por su cuenta (ver [Recall]). */
+    fun learnedCount(): Int = runCatching { Recall.get(appContext).count() }.getOrDefault(0)
 
     fun facts(): List<String> {
         val array = JSONArray(prefs.getString("facts", "[]"))
@@ -178,6 +183,12 @@ class Memory(context: Context) {
             append("\n\nCosas que Maurizio te ha enseñado y que debes tener siempre en cuenta:\n")
             facts.forEach { append("- ").append(it).append('\n') }
         }
+        val learned = runCatching { Recall.get(appContext).alwaysOn() }.getOrDefault(emptyList())
+        if (learned.isNotEmpty()) {
+            append("\nLo que has aprendido tú de Maurizio (reglas y preferencias; las correcciones mandan):\n")
+            learned.forEach { append("- ").append(it.text).append('\n') }
+        }
+        append("\nPara lo que aprendiste antes sobre un tema, usa recordar.")
     }
 
     private fun saveSkills(skills: Map<String, String>) {

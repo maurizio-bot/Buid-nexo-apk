@@ -781,6 +781,7 @@ class MainActivity : ComponentActivity() {
         LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { ControlCard() }
             item { BrainCard() }
+            item { LearnedCard() }
             item { ExpertCard() }
             item {
                 Card {
@@ -1227,6 +1228,84 @@ class MainActivity : ComponentActivity() {
                 training = it
             }
             if (saved > 0) TextButton(onClick = { TrainingLog.clear(this@MainActivity); tick += 10 }) { Text("Borrar conversaciones guardadas") }
+        }
+    }
+
+    /** Lo que ha aprendido sola: verlo, fijarlo, borrarlo y elegir cuánto espacio puede ocupar. */
+    @Composable
+    private fun LearnedCard() {
+        val recall = remember { Recall.get(this@MainActivity) }
+        var version by remember { mutableStateOf(0) }
+        var filter by remember { mutableStateOf("") }
+        var learning by remember { mutableStateOf(recall.learning) }
+        var limit by remember { mutableStateOf(recall.limitMb) }
+        var showAll by remember { mutableStateOf(false) }
+        val items = remember(version, filter) { runCatching { recall.all(filter) }.getOrDefault(emptyList()) }
+        val usedMb = remember(version) { recall.usedBytes() / (1024.0 * 1024.0) }
+        Card {
+            SectionTitle(
+                "Lo que ha aprendido",
+                "Aprende sola de lo que habláis y de tus correcciones (\"así no\", \"prefiero que…\"). Lo importante y lo fijado lo tiene siempre en cuenta; lo trivial que no usa lo olvida con el tiempo.",
+            )
+            SettingSwitch("Aprender sola de las conversaciones", "Nunca toca nada del teléfono para aprender: solo lee lo que habláis.", learning) {
+                recall.learning = it
+                learning = it
+            }
+            Text(
+                "${items.size} recuerdos · ${String.format(java.util.Locale.US, "%.1f", usedMb)} MB de $limit MB (contando la caché de internet)",
+                color = UltraColors.Text,
+                fontSize = 13.sp,
+            )
+            Text("Espacio máximo (al acercarse, junta recuerdos parecidos y borra los que menos usa):", color = UltraColors.Muted, fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                listOf(100, 250, 500, 1000, 2000).forEach { mb ->
+                    TextButton(onClick = {
+                        recall.limitMb = mb
+                        limit = mb
+                        recall.maintain()
+                        version++
+                    }) {
+                        Text(if (mb >= 1000) "${mb / 1000} GB" else "$mb MB", color = if (mb == limit) UltraColors.Accent else UltraColors.Muted, fontSize = 13.sp)
+                    }
+                }
+            }
+            OutlinedTextField(
+                value = filter,
+                onValueChange = { filter = it },
+                label = { Text("Buscar en lo aprendido") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (items.isEmpty()) Text("Todavía no ha aprendido nada por su cuenta.", color = UltraColors.Muted, fontSize = 13.sp)
+            (if (showAll) items else items.take(15)).forEach { item ->
+                Column(Modifier.fillMaxWidth()) {
+                    Text((if (item.pinned) "📌 " else "") + item.text, color = UltraColors.Text, fontSize = 14.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${item.kind} · ${item.tierName} · usado ${item.uses} ${if (item.uses == 1) "vez" else "veces"}",
+                            color = UltraColors.Muted,
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = {
+                            recall.setPinned(item.id, !item.pinned)
+                            brainDirty = true
+                            version++
+                        }) { Text(if (item.pinned) "Soltar" else "Fijar") }
+                        TextButton(onClick = {
+                            recall.delete(item.id)
+                            brainDirty = true
+                            version++
+                        }) { Text("Borrar") }
+                    }
+                }
+            }
+            if (items.size > 15) TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Ver menos" else "Ver los ${items.size}") }
+            if (items.isNotEmpty()) TextButton(onClick = {
+                recall.clear()
+                brainDirty = true
+                version++
+            }) { Text("Olvidar todo lo aprendido (menos lo fijado)") }
         }
     }
 
