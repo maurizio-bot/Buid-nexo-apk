@@ -8,7 +8,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION=1.13.8
 DEST=app/src/main/jniLibs/arm64-v8a
-if [ -f "$DEST/libsherpa-onnx-jni.so" ] && [ -f "build/.sherpa-$VERSION" ]; then
+VAD=app/src/main/assets/silero_vad.onnx
+if [ -f "$DEST/libsherpa-onnx-jni.so" ] && [ -f "build/.sherpa-$VERSION" ] && [ -f "$VAD" ]; then
   echo "Motor de voz ya está."; exit 0
 fi
 
@@ -25,5 +26,12 @@ for lib in libsherpa-onnx-jni.so libonnxruntime.so; do
   [ -n "$found" ] || { echo "No encuentro $lib en el paquete de sherpa-onnx" >&2; exit 1; }
   cp "$found" "$DEST/$lib"
 done
+# Detector de voz (Silero, 640 KB): va dentro del APK. Con él la palabra "Ultra" solo despierta al oído
+# cuando alguien habla, y el resto del tiempo apenas gasta batería.
+mkdir -p "$(dirname "$VAD")"
+curl -fsSL --retry 4 -o "$VAD" \
+  "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+echo "Huella del detector de voz: $(sha256sum "$VAD" | cut -d' ' -f1)"
+
 mkdir -p build && touch "build/.sherpa-$VERSION"
 echo "Motor de voz listo (sherpa-onnx $VERSION)."

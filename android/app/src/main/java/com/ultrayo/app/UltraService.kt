@@ -48,6 +48,9 @@ class UltraService : Service() {
     /** El reconocedor de Android no puede usar el micrófono desde aquí: usar el de Vosk. */
     private var useVoskEar = false
 
+    /** La palabra se escucha con el detector de voz + oído rápido (NeuralWake), no con Vosk. */
+    private var neural = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -80,8 +83,20 @@ class UltraService : Service() {
             .apply { acquire() }
         Assistant.loadBrain()
         loader.execute {
+            // Primero la forma rápida (detector de voz + oído rápido); si no está, Vosk como antes.
+            val fast = NeuralWake.available(this) && runCatching { NeuralWake.load(this) }
+                .onFailure { ErrorLog.add("No pude cargar la palabra \"Ultra\" rápida", it) }.isSuccess
+            if (fast) {
+                ContextCompat.getMainExecutor(this).execute {
+                    if (instance === this) {
+                        neural = true
+                        startWake()
+                    }
+                }
+                return@execute
+            }
             val loaded = try {
-                Model(WakeModel.dir(this).path)
+                if (WakeModel.isReady(this)) Model(WakeModel.dir(this).path) else null
             } catch (e: Exception) {
                 null
             }
@@ -113,6 +128,7 @@ class UltraService : Service() {
             Assistant.onCut = null
         }
         stopVosk()
+        NeuralWake.stop()
         model?.close()
         model = null
         wakeLock?.let { if (it.isHeld) it.release() }
@@ -121,9 +137,26 @@ class UltraService : Service() {
 
     // --- La palabra "Ultra" ---
 
+    private var wakeFailures = 0
+
     private fun startWake() {
-        val model = model ?: return
         if (busy) return
+        if (neural) {
+            NeuralWake.start(
+                onWake = { rest ->
+                    wakeFailures = 0
+                    wake(rest)
+                },
+                onFailed = {
+                    // Otra app tiene el micrófono (una llamada, la grabadora…): reintentar en un rato.
+                    wakeFailures++
+                    if (wakeFailures == 3) Assistant.status = "Otra app está usando el micrófono; vuelvo a escuchar \"Ultra\" cuando lo suelte."
+                    main.postDelayed({ if (instance === this && !busy) startWake() }, minOf(30_000L, 2_000L * wakeFailures))
+                },
+            )
+            return
+        }
+        val model = model ?: return
         stopVosk()
         val rec = Recognizer(model, SAMPLE_RATE, WAKE_GRAMMAR)
         recognizer = rec
@@ -145,19 +178,43 @@ class UltraService : Service() {
         if (heard.contains("ultra")) wake()
     }
 
-    /** Empieza a conversar: al oír "Ultra" o al tocar el reactor. */
-    fun wake() {
+    /**
+     * Empieza a conversar: al oír "Ultra" o al tocar el reactor. [said] es lo que dijo detrás de
+     * "Ultra" de un tirón ("Ultra, ¿qué hora es?"): si hay algo, se contesta directamente sin volver a escuchar.
+     */
+    fun wake(said: String = "") {
         // No hacer caso de su propia voz (por ejemplo cuando dice "Ultra Yo"). Si estaba "ocupado"
         // pero ya no habla, ni piensa, ni escucha, es que lo cortaron a medias: se puede volver a empezar.
         if (Assistant.speaking || Assistant.thinking || Assistant.listening) return
         busy = true
         val mine = ++session
         stopVosk()
-        Assistant.startConversation(ear) {
+        NeuralWake.stop()
+        val command = said.trim().takeIf { it.count(Char::isLetterOrDigit) >= 2 }
+        if (command == null) beep()
+        val first = Ear { onHeard, onNothing, onFailed ->
+            // La primera vez entrega lo que ya dijo con "Ultra"; luego, a escuchar como siempre.
+            val pending = pendingCommand
+            pendingCommand = null
+            if (pending != null) onHeard(pending) else ear.listen(onHeard, onNothing, onFailed)
+        }
+        pendingCommand = command?.replaceFirstChar { it.uppercase() }
+        Assistant.startConversation(first) {
             if (session == mine) {
                 busy = false
                 startWake()
             }
+        }
+    }
+
+    private var pendingCommand: String? = null
+
+    /** Un pitido corto: "te escucho", para cuando la pantalla está apagada. */
+    private fun beep() {
+        runCatching {
+            val tone = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 70)
+            tone.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 150)
+            main.postDelayed({ tone.release() }, 400)
         }
     }
 

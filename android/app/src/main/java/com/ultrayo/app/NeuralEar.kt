@@ -51,6 +51,7 @@ object NeuralEar {
         private set
 
     /** Carga el modelo (un segundo o dos). Se llama fuera del hilo principal. */
+    @Synchronized
     fun load(context: Context) {
         if (ready || !VoiceModels.isReady(context, VoiceModels.Kind.EAR)) return
         val dir = VoiceModels.dir(context, VoiceModels.Kind.EAR)
@@ -87,6 +88,26 @@ object NeuralEar {
             ),
         )
         ready = true
+    }
+
+    /**
+     * Transcribe de una vez un trozo de audio ya grabado (16 kHz, de -1 a 1). Lo usa la palabra "Ultra":
+     * el detector de voz corta la frase y aquí se escribe entera, sin esperar a los trozos de 1,3 s del
+     * modo en streaming. Se llama fuera del hilo principal; devuelve "" si el oído no está cargado.
+     */
+    fun transcribe(samples: FloatArray): String {
+        val rec = recognizer ?: return ""
+        val stream = rec.createStream()
+        return try {
+            stream.acceptWaveform(samples, RATE)
+            // El modelo necesita algo de silencio detrás para soltar las últimas palabras.
+            stream.acceptWaveform(FloatArray(RATE * 13 / 10), RATE)
+            stream.inputFinished()
+            while (rec.isReady(stream)) rec.decode(stream)
+            rec.getResult(stream).text.trim()
+        } finally {
+            stream.release()
+        }
     }
 
     /** Escucha una frase. Va enseñando lo que oye con [onPartial]. Todo se llama en el hilo principal. */

@@ -299,7 +299,8 @@ class MainActivity : ComponentActivity() {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
-        if (!WakeModel.isReady(this)) {
+        // Con la voz rápida descargada, "Ultra" se escucha con ella y no hace falta Vosk.
+        if (!WakeModel.isReady(this) && !NeuralWake.available(this)) {
             preparingWake = true
             status = "Preparando el oído para la palabra \"Ultra\" (40 MB, solo una vez)…"
             lifecycleScope.launch {
@@ -809,6 +810,7 @@ class MainActivity : ComponentActivity() {
                         "Aunque la app esté cerrada o el teléfono bloqueado. Deja un aviso fijo mientras escucha.",
                         wakeOn,
                     ) { setWake(it) }
+                    WakeBatteryHint()
                     FastVoiceSettings()
                     BluetoothSettings()
                     SettingSwitch(
@@ -992,6 +994,40 @@ class MainActivity : ComponentActivity() {
             color = if (device.isNotEmpty()) UltraColors.Accent else UltraColors.Muted,
             fontSize = 13.sp,
         )
+    }
+
+    /**
+     * Para que Samsung no duerma la escucha de "Ultra" con la pantalla apagada: pedir que no le
+     * restrinja la batería. Con la voz rápida descargada, la palabra gasta poco (solo trabaja a fondo
+     * cuando alguien habla).
+     */
+    @Composable
+    private fun WakeBatteryHint() {
+        val power = getSystemService(android.os.PowerManager::class.java)
+        var free by remember { mutableStateOf(power.isIgnoringBatteryOptimizations(packageName)) }
+        val fast = NeuralWake.available(this)
+        Text(
+            buildString {
+                append(if (fast) "Escucha \"Ultra\" con la voz rápida: rápida y con pocas falsas alarmas. Puedes decirlo todo de un tirón: \"Ultra, ¿qué hora es?\". "
+                else "Descarga la voz rápida (abajo) para que \"Ultra\" se oiga mejor y gaste menos. ")
+                append("Con el coche o los cascos conectados la oye por el micrófono del teléfono, sin cortar la música.")
+            },
+            color = UltraColors.Muted,
+            fontSize = 13.sp,
+        )
+        if (!free) {
+            GlowButton("Que no la duerma el ahorro de batería", onClick = {
+                runCatching {
+                    startActivity(
+                        Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                            .setData(Uri.parse("package:$packageName")),
+                    )
+                }.onFailure {
+                    runCatching { startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                }
+                free = true
+            })
+        }
     }
 
     /** La voz rápida: oído y voz neural dentro del teléfono (sherpa-onnx). */

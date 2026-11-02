@@ -12,10 +12,12 @@ Tu propia IA, tipo Jarvis, que vive **dentro de tu teléfono Android**. No se co
 
 Después de cargar el modelo, la app descarga también un "oído" pequeño (unos 40 MB, una sola vez) y se queda escuchando la palabra **"Ultra"**, aunque la cierres o bloquees el teléfono. Verás un aviso fijo de "Ultra Yo te escucha".
 
+- Con la voz rápida descargada (Ajustes → Voz), "Ultra" se escucha con ella: un detector de voz diminuto escucha todo el rato y, solo cuando alguien habla, el oído en español escribe la frase y mira si empieza por "Ultra". Gasta poco con la pantalla apagada, no se despierta con "ultravioleta", "cultura" u "otra", y puedes decirlo todo de un tirón: **"Ultra, ¿qué hora es?"** contesta directamente. Si dices solo "Ultra", pita y te escucha.
+- Con el coche o los cascos Bluetooth conectados, "Ultra" se oye por el micrófono del teléfono y la música sigue sonando; al hablar con ella sí pasa al micro del coche. Escuchar siempre por el micro del coche no es viable: Bluetooth solo lo da en modo llamada, que corta la música.
 - Di "Ultra", espera un instante y habla. Te contesta en voz alta y sigue escuchando, así que puedes conversar sin repetir "Ultra". Cuando te callas, vuelve a esperar la palabra.
 - Siempre contesta por voz, también cuando le escribes. Di o escribe **"modo texto"** para que conteste por escrito, y **"modo voz"** para volver.
 - Se apaga desde el aviso ("Dejar de escuchar") o en Ajustes → Voz.
-- En Samsung, para que Android no la cierre: Ajustes → Aplicaciones → Ultra Yo → Batería → **Sin restricciones**.
+- En Samsung, para que Android no la cierre: Ajustes → Aplicaciones → Ultra Yo → Batería → **Sin restricciones** (o el botón "Que no la duerma el ahorro de batería" en Ajustes → Voz).
 
 La palabra "Ultra" se reconoce dentro del teléfono, sin enviar nada a internet.
 
