@@ -781,6 +781,7 @@ class MainActivity : ComponentActivity() {
         LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { ControlCard() }
             item { BrainCard() }
+            item { CardsCard() }
             item { LearnedCard() }
             item { ExpertCard() }
             item {
@@ -1228,6 +1229,46 @@ class MainActivity : ComponentActivity() {
                 training = it
             }
             if (saved > 0) TextButton(onClick = { TrainingLog.clear(this@MainActivity); tick += 10 }) { Text("Borrar conversaciones guardadas") }
+        }
+    }
+
+    /** Las fichas (memoria rápida): proyectos, personas y lugares, con su resumen. */
+    @Composable
+    private fun CardsCard() {
+        val cards = remember { Cards.get(this@MainActivity) }
+        var version by remember { mutableStateOf(0) }
+        var note by remember { mutableStateOf("") }
+        var showAll by remember { mutableStateOf(false) }
+        val items = remember(version) { runCatching { cards.ranked() }.getOrDefault(emptyList()) }
+        Card {
+            SectionTitle(
+                "Fichas (memoria rápida)",
+                "Proyectos, personas y lugares que conoce, con un resumen. Cuando los nombras, encuentra la ficha al instante (aunque te entienda mal el nombre) y le pasa al modelo su detalle. Di \"nuevo proyecto X: de qué va\", \"apunta en X: …\" o \"¿recuerdas X?\". De madrugada, si está cargando, repasa y rehace los resúmenes.",
+            )
+            if (items.isEmpty()) Text("Todavía no hay fichas. Se crean solas al hablar de tus proyectos o con \"nuevo proyecto…\".", color = UltraColors.Muted, fontSize = 13.sp)
+            (if (showAll) items else items.take(12)).forEach { f ->
+                Column(Modifier.fillMaxWidth()) {
+                    Text("${f.name} · ${f.kind}", color = UltraColors.Text, fontSize = 14.sp)
+                    if (f.summary.isNotBlank()) Text(f.summary, color = UltraColors.Muted, fontSize = 13.sp)
+                    if (f.aliases.isNotEmpty()) Text("También: " + f.aliases.joinToString(), color = UltraColors.Muted, fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("usada ${f.uses} ${if (f.uses == 1) "vez" else "veces"}", color = UltraColors.Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        TextButton(onClick = {
+                            cards.delete(f.id)
+                            version++
+                        }) { Text("Quitar") }
+                    }
+                }
+            }
+            if (items.size > 12) TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Ver menos" else "Ver las ${items.size}") }
+            if (items.isNotEmpty()) TextButton(onClick = {
+                note = "Repasando…"
+                Learner.consolidate { n ->
+                    note = if (n == 0) "Repaso hecho; no había resúmenes que cambiar." else "Repaso hecho: $n resumen${if (n == 1) "" else "es"} al día."
+                    version++
+                }
+            }) { Text("Repasar ahora (rehacer resúmenes)") }
+            if (note.isNotEmpty()) Text(note, color = UltraColors.Muted, fontSize = 13.sp)
         }
     }
 

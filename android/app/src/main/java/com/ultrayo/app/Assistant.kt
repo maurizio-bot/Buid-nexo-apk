@@ -143,7 +143,7 @@ object Assistant {
                         Ai.brain = Brain(
                             downloader.file.path,
                             app.cacheDir.path,
-                            listOf(PhoneTools(app), ControlTools(app), KnowledgeTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
+                            listOf(PhoneTools(app), ControlTools(app), KnowledgeTools(app), CardTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
                         ).also {
                             it.load(useGpu = gpu)
                             GpuGuard.afterLoad(app, tried = gpu, onGpu = it.onGpu)
@@ -503,6 +503,11 @@ object Assistant {
                 say(answer, onDone)
                 return
             }
+            // Fichas (memoria rápida): "¿recuerdas proyecto1?", "nuevo proyecto X: …", "apunta en X: …".
+            runCatching { CardCommands.handle(text, app) }.getOrNull()?.let { answer ->
+                say(answer, onDone)
+                return
+            }
             Teaching.handle(text, memory)?.let { answer ->
                 brainDirty = true
                 say(answer, onDone)
@@ -573,10 +578,19 @@ object Assistant {
         Learner.beforeAsk()
         val deep = Thinking.isHard(text)
         // Lo aprendido que viene al caso (lo importante ya va siempre en las instrucciones).
+        // Si nombra un proyecto, persona o lugar con ficha, su detalle va ya preparado (sin vuelta extra del modelo).
+        val cards = runCatching { Cards.get(app) }.getOrNull()
+        val cardBlocks = runCatching {
+            cards?.detect(text)?.map { f -> cards.touch(f.id); cards.context(f, text) }
+        }.getOrNull().orEmpty()
         val always = runCatching { Recall.get(app).alwaysOn().map { it.id }.toSet() }.getOrDefault(emptySet())
-        val related = runCatching { Recall.get(app).relevant(text, k = 4, exclude = always) }.getOrDefault(emptyList())
-        val withMemory = if (related.isEmpty()) prompt0
-        else "[Cosas que aprendiste antes y pueden venir al caso:\n${related.joinToString("\n") { "- " + it.text }}]\n\n$prompt0"
+        val shownIds = always + cardBlocks.flatMap { it.second }
+        val related = runCatching { Recall.get(app).relevant(text, k = if (cardBlocks.isEmpty()) 4 else 2, exclude = shownIds) }.getOrDefault(emptyList())
+        val withMemory = buildString {
+            cardBlocks.forEach { append(it.first).append("\n\n") }
+            if (related.isNotEmpty()) append("[Cosas que aprendiste antes y pueden venir al caso:\n${related.joinToString("\n") { "- " + it.text }}]\n\n")
+            append(prompt0)
+        }
         val prompt = if (deep) Thinking.wrap(withMemory) else withMemory
         thinking = true
         status = if (deep) "Pensando a fondo…" else "Pensando…"

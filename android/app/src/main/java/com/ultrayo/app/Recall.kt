@@ -133,6 +133,24 @@ class Recall private constructor(private val context: Context, file: File) :
         return found
     }
 
+    /**
+     * Los recuerdos cuyo texto cumple [belongs] (por ejemplo, los de una ficha), los más parecidos a
+     * [query] primero. Cuentan como usados.
+     */
+    @Synchronized
+    fun matching(query: String, k: Int, belongs: (String) -> Boolean): List<Learned> {
+        val q = vector(query)
+        val found = rows().filter { belongs(it.learned.text) }
+            .sortedByDescending { similarity(it.vec, q) + it.learned.tier * 0.05 }.take(k).map { it.learned }
+        if (found.isNotEmpty()) {
+            writableDatabase.execSQL(
+                "UPDATE recuerdos SET usado = ?, usos = usos + 1 WHERE id IN (${found.joinToString(",") { it.id.toString() }})",
+                arrayOf<Any>(System.currentTimeMillis()),
+            )
+        }
+        return found
+    }
+
     /** Lo que se tiene siempre en cuenta: fijado, reglas e importante (lo más valioso primero). */
     fun alwaysOn(limit: Int = 30): List<Learned> =
         rows().map { it.learned }.filter { it.pinned || it.tier >= 2 || it.kind == "regla" }

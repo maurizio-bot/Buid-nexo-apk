@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.14.0"
+        versionCode = 21
+        versionName = "0.15.0"
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior
