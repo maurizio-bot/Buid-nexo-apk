@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Ultra Yo</string>
+    <string name="control_nombre">Ultra Yo · control del teléfono</string>
+    <string name="control_descripcion">Deja que Ultra Yo lea la pantalla y pulse, escriba y se desplace en tus apps cuando tú se lo pidas. Nunca actúa por su cuenta: antes de enviar, pagar, llamar o borrar te pide un sí, y siempre tienes un botón de PARAR. Todo queda apuntado en su registro.</string>
 </resources>

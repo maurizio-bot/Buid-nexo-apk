@@ -41,6 +41,10 @@ class UltraService : Service() {
     /** Está conversando: no hay que escuchar la palabra mientras tanto. */
     private var busy = false
 
+    /** Cuenta las conversaciones, para saber si un corte es de la actual. */
+    private var session = 0
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
     /** El reconocedor de Android no puede usar el micrófono desde aquí: usar el de Vosk. */
     private var useVoskEar = false
 
@@ -59,6 +63,18 @@ class UltraService : Service() {
             return
         }
         instance = this
+        // Si Maurizio corta la respuesta (Parar, tocar el reactor), volver a esperar "Ultra".
+        Assistant.onCut = {
+            val mine = session
+            main.postDelayed({
+                if (instance === this && busy && session == mine &&
+                    !Assistant.listening && !Assistant.thinking && !Assistant.speaking
+                ) {
+                    busy = false
+                    startWake()
+                }
+            }, 500)
+        }
         wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ultrayo:escucha")
             .apply { acquire() }
@@ -92,7 +108,10 @@ class UltraService : Service() {
     }
 
     override fun onDestroy() {
-        if (instance === this) instance = null
+        if (instance === this) {
+            instance = null
+            Assistant.onCut = null
+        }
         stopVosk()
         model?.close()
         model = null
@@ -128,14 +147,17 @@ class UltraService : Service() {
 
     /** Empieza a conversar: al oír "Ultra" o al tocar el reactor. */
     fun wake() {
-        if (busy) return
-        // No hacer caso de su propia voz (por ejemplo cuando dice "Ultra Yo").
+        // No hacer caso de su propia voz (por ejemplo cuando dice "Ultra Yo"). Si estaba "ocupado"
+        // pero ya no habla, ni piensa, ni escucha, es que lo cortaron a medias: se puede volver a empezar.
         if (Assistant.speaking || Assistant.thinking || Assistant.listening) return
         busy = true
+        val mine = ++session
         stopVosk()
         Assistant.converse(ear) {
-            busy = false
-            startWake()
+            if (session == mine) {
+                busy = false
+                startWake()
+            }
         }
     }
 

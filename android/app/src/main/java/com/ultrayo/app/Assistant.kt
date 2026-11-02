@@ -91,18 +91,21 @@ object Assistant {
         if (::app.isInitialized) return
         app = context.applicationContext
         memory = Memory(app)
+        Control.init(app)
         brainReady = Ai.brain != null
         tts = TextToSpeech(app) { result ->
             if (result == TextToSpeech.SUCCESS) {
                 tts?.language = Locale.forLanguageTag("es-ES")
+                // Un poco más rápida que la voz por defecto: más ágil, menos robot.
+                tts?.setSpeechRate(1.1f)
                 ttsReady = true
             }
         }.apply {
             setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) = main.post { finishSpeech() }.let {}
+                override fun onDone(utteranceId: String?) = main.post { utteranceDone(utteranceId) }.let {}
                 @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) = main.post { finishSpeech() }.let {}
+                override fun onError(utteranceId: String?) = main.post { utteranceDone(utteranceId) }.let {}
             })
         }
     }
@@ -129,7 +132,7 @@ object Assistant {
                         Ai.brain = Brain(
                             downloader.file.path,
                             app.cacheDir.path,
-                            listOf(PhoneTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
+                            listOf(PhoneTools(app), ControlTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
                         ).also { it.load() }
                     }
                 }
@@ -153,7 +156,24 @@ object Assistant {
             return@Ear
         }
         stopSpeaking()
+        listenWithAndroid(onHeard, onNothing, onFailed, retried = false)
+    }
+
+    /** Si pedir el reconocimiento sin red falló una vez en este teléfono, ya no se pide. */
+    private var offlineFails = false
+
+    /**
+     * Escucha una frase. Si el reconocedor falla al arrancar (error 5 de cliente, ocupado, idioma sin
+     * red…), lo cierra, crea uno nuevo y lo intenta otra vez sin pedir modo sin red.
+     */
+    private fun listenWithAndroid(
+        onHeard: (String) -> Unit,
+        onNothing: () -> Unit,
+        onFailed: (Int) -> Unit,
+        retried: Boolean,
+    ) {
         val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(app).also { recognizer = it }
+        var heardSomething = false
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 listening = true
@@ -174,11 +194,26 @@ object Assistant {
                         status = ""
                         onNothing()
                     }
+                    SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+                    SpeechRecognizer.ERROR_SERVER_DISCONNECTED, SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
+                    SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE, SpeechRecognizer.ERROR_SERVER,
+                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
+                        if (retried || heardSomething) {
+                            onFailed(error)
+                        } else {
+                            offlineFails = true
+                            recognizer?.destroy()
+                            recognizer = null
+                            main.postDelayed({ listenWithAndroid(onHeard, onNothing, onFailed, retried = true) }, 250)
+                        }
+                    }
                     else -> onFailed(error)
                 }
             }
 
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() {
+                heardSomething = true
+            }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
@@ -188,6 +223,9 @@ object Assistant {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, app.packageName)
+            // Reconocer dentro del teléfono si se puede (no espera a la red), salvo que ya haya fallado.
+            if (!offlineFails && !retried) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         }
         r.startListening(intent)
     }
@@ -207,7 +245,13 @@ object Assistant {
             },
             onNothing = onEnd,
             onFailed = { error ->
-                status = "Error del micrófono ($error)"
+                status = when (error) {
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Necesito permiso para usar el micrófono."
+                    SpeechRecognizer.ERROR_AUDIO -> "Otra app está usando el micrófono."
+                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER ->
+                        "El reconocedor de voz necesita internet o el paquete de español sin conexión."
+                    else -> "El reconocedor de voz no arrancó ($error). Toca el reactor otra vez."
+                }
                 onEnd()
             },
         )
@@ -221,18 +265,55 @@ object Assistant {
             onDone?.invoke()
             return
         }
+        stopSpeaking()
         afterSpeech = onDone
-        speaking = true
-        val spoken = text.replace(Regex("[*#_`>|]"), "")
-        tts?.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "reply")
+        speakPart(text)
+        maybeFinishSpeech()
     }
 
+    /** Dice algo que llega más tarde (por ejemplo "Enviado"), desde cualquier hilo. */
+    fun notify(text: String) = main.post { say(text) }.let {}
+
+    /** Se llama cuando una respuesta se corta a medias (para que el servicio vuelva a escuchar "Ultra"). */
+    var onCut: (() -> Unit)? = null
+
+    /** Cambia cada vez que se corta la voz: lo que llegue de una respuesta anterior ya no se dice. */
+    private var generation = 0
+    private var utteranceSeq = 0
+    private var queued = 0
+
+    /** La respuesta aún se está escribiendo: no dar la voz por terminada aunque la cola se vacíe. */
+    private var streamOpen = false
+
+    /** Pone [text] en la cola de la voz, sin cortar lo que ya está diciendo. */
+    private fun speakPart(text: String) {
+        val spoken = text.replace(Regex("[*#_`>|]"), "").replace(Regex("https?://\\S+"), "el enlace").trim()
+        if (spoken.isEmpty() || !ttsReady) return
+        queued++
+        speaking = true
+        tts?.speak(spoken, TextToSpeech.QUEUE_ADD, null, "g${generation}_${utteranceSeq++}")
+    }
+
+    private fun utteranceDone(id: String?) {
+        if (id?.startsWith("g${generation}_") != true) return
+        if (queued > 0) queued--
+        maybeFinishSpeech()
+    }
+
+    private fun maybeFinishSpeech() {
+        if (queued == 0 && !streamOpen) finishSpeech()
+    }
+
+    /** Corta la voz al instante (tocar el reactor, "para", el botón de parar). */
     fun stopSpeaking() {
-        if (speaking) {
-            tts?.stop()
-            afterSpeech = null
-            speaking = false
-        }
+        val cut = afterSpeech != null
+        generation++
+        queued = 0
+        streamOpen = false
+        afterSpeech = null
+        if (cut) onCut?.invoke()
+        if (speaking) tts?.stop()
+        speaking = false
     }
 
     private fun finishSpeech() {
@@ -240,6 +321,38 @@ object Assistant {
         val next = afterSpeech
         afterSpeech = null
         next?.invoke()
+    }
+
+    /**
+     * Saca de [buffer] las frases ya completas para decirlas mientras el modelo sigue escribiendo.
+     * La primera se corta antes (en una coma) para que empiece a hablar cuanto antes.
+     */
+    private fun takeSentences(buffer: StringBuilder, final: Boolean, first: Boolean): List<String> {
+        val parts = mutableListOf<String>()
+        while (true) {
+            var cut = -1
+            for (i in buffer.indices) {
+                val ch = buffer[i]
+                val next = buffer.getOrNull(i + 1)
+                if (ch in ".!?…:;\n" && (next == null && final || next == ' ' || next == '\n')) {
+                    cut = i + 1
+                    break
+                }
+                if (first && parts.isEmpty() && ch == ',' && next == ' ' && i >= 40) {
+                    cut = i + 1
+                    break
+                }
+            }
+            if (cut == -1) break
+            parts += buffer.substring(0, cut)
+            buffer.delete(0, cut)
+        }
+        if (final && buffer.isNotBlank()) {
+            parts += buffer.toString()
+            buffer.clear()
+        }
+        // No leer en voz alta código ni herramientas escritas como texto.
+        return parts.map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("```") && !Regex("\\w\\(.*[=:]\\s*\"").containsMatchIn(it) }
     }
 
     // --- Conversación ---
@@ -262,6 +375,17 @@ object Assistant {
 
         if (attached == null) {
             val command = text.trim()
+            // Lo primero, y sin pensar: parar, o el sí/no a una acción pendiente.
+            if (Control.isStop(QuickActions.clean(command))) {
+                Control.stop()
+                say("Parado.", onDone)
+                return
+            }
+            Control.answer(QuickActions.clean(command))?.let { answer ->
+                say(answer, onDone)
+                return
+            }
+            Control.resume()
             if (textMode.containsMatchIn(command)) {
                 memory.voiceReplies = false
                 say("Vale, a partir de ahora te contesto por escrito. Dime \"modo voz\" para volver.", onDone)
@@ -270,6 +394,11 @@ object Assistant {
             if (voiceMode.containsMatchIn(command)) {
                 memory.voiceReplies = true
                 say("Hecho, vuelvo a contestarte en voz alta.", onDone)
+                return
+            }
+            // Órdenes del teléfono: al instante, sin pasar por el modelo.
+            QuickActions.handle(app, text)?.let { answer ->
+                say(answer, onDone)
                 return
             }
             ClaudeLink.questionIn(text)?.let { question ->
@@ -343,32 +472,108 @@ object Assistant {
         val reset = brainDirty
         brainDirty = false
         val systemPrompt = memory.systemPrompt()
+        val image = attached?.imagePath
+
+        // La respuesta aparece y se dice según el modelo la escribe.
+        stopSpeaking()
+        val gen = generation
+        val voice = memory.voiceReplies && ttsReady
+        if (voice) {
+            streamOpen = true
+            afterSpeech = onDone
+        }
+        val shown = StringBuilder()
+        val unspoken = StringBuilder()
+        var turnIndex = -1
+        var spokeAny = false
+
+        fun showLive() {
+            if (turnIndex == -1 || turnIndex >= turns.size) {
+                thinking = false
+                status = ""
+                turns.add(Turn("assistant", shown.toString()))
+                turnIndex = turns.lastIndex
+            } else {
+                turns[turnIndex] = turns[turnIndex].copy(content = shown.toString())
+            }
+        }
+
+        val onChunk: (String) -> Unit = { delta ->
+            main.post {
+                if (gen != generation) return@post
+                shown.append(delta)
+                showLive()
+                if (voice) {
+                    unspoken.append(delta)
+                    takeSentences(unspoken, final = false, first = !spokeAny).forEach {
+                        speakPart(it)
+                        spokeAny = true
+                    }
+                }
+            }
+        }
+
         scope.launch {
+            var failure: String? = null
             val reply = try {
                 withContext(Ai.thread) {
                     try {
                         if (reset) brain.reset(systemPrompt, history)
-                        brain.ask(prompt, attached?.imagePath)
+                        brain.askStreaming(prompt, image, onChunk)
                     } catch (e: Exception) {
                         if (!Brain.isFull(e)) throw e
                         // La conversación ya no cabe: empieza de cero (la memoria se conserva) y lo intenta otra vez.
                         brain.reset(systemPrompt, emptyList())
-                        brain.ask(prompt.take(MAX_PROMPT), attached?.imagePath)
+                        brain.askStreaming(prompt.take(MAX_PROMPT), image, onChunk)
                     }
                 }
             } catch (e: Exception) {
                 brainDirty = true
-                if (Brain.isFull(e)) {
+                failure = if (Brain.isFull(e)) {
                     "Eso es demasiado largo para leerlo de una vez. Pídeme una parte concreta, por ejemplo un archivo de dentro."
                 } else {
                     "Algo falló: ${e.message}"
                 }
+                ""
             }
-            thinking = false
-            // Si el modelo escribió la herramienta como texto en vez de usarla, se hace por él.
-            val written = WrittenCalls.handle(app, reply)
-            val shown = if (written != null) (written.remainingText + "\n\n" + written.done.joinToString(" ")).trim() else reply
-            say(shown.ifBlank { "No sé qué responder a eso." }, onDone)
+            val failed = failure
+            // Los últimos trozos llegan por el hilo principal: que se pongan antes de cerrar.
+            main.post {
+                thinking = false
+                if (gen != generation) {
+                    onCut?.invoke()
+                    return@post
+                }
+                if (failed != null && turnIndex == -1) {
+                    say(failed, onDone)
+                    return@post
+                }
+                // Si el modelo escribió la herramienta como texto en vez de usarla, se hace por él.
+                val written = WrittenCalls.handle(app, reply)
+                val finalText = when {
+                    written != null -> (written.remainingText + "\n\n" + written.done.joinToString(" ")).trim()
+                    failed != null -> "$shown\n\n($failed)".trim()
+                    else -> reply.ifBlank { shown.toString() }
+                }.ifBlank { "No sé qué responder a eso." }
+                shown.setLength(0)
+                shown.append(finalText)
+                showLive()
+                status = ""
+                if (voice) {
+                    if (written != null) {
+                        unspoken.clear()
+                        speakPart(written.done.joinToString(" "))
+                    } else if (!spokeAny && unspoken.isEmpty()) {
+                        speakPart(finalText)
+                    } else {
+                        takeSentences(unspoken, final = true, first = false).forEach { speakPart(it) }
+                    }
+                    streamOpen = false
+                    maybeFinishSpeech()
+                } else {
+                    onDone?.invoke()
+                }
+            }
         }
     }
 

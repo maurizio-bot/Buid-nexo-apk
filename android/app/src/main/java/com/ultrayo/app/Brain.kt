@@ -98,6 +98,30 @@ class Brain(
     }
 
     /**
+     * Como [ask], pero va entregando la respuesta a trozos según el modelo la escribe, para que
+     * Ultra Yo empiece a hablar sin esperar al final. Devuelve la respuesta completa.
+     */
+    suspend fun askStreaming(text: String, imagePath: String? = null, onChunk: (String) -> Unit): String {
+        val conversation = checkNotNull(conversation) { "No hay conversación" }
+        val flow = if (imagePath != null && visionEnabled) {
+            conversation.sendMessageAsync(Contents.of(Content.ImageFile(imagePath), Content.Text(text)))
+        } else {
+            conversation.sendMessageAsync(Contents.of(text))
+        }
+        val full = StringBuilder()
+        flow.collect { message ->
+            val piece = message.toString()
+            // Por si el motor entrega el texto acumulado en vez de solo lo nuevo.
+            val delta = if (full.isNotEmpty() && piece.length > full.length && piece.startsWith(full)) piece.substring(full.length) else piece
+            if (delta.isNotEmpty()) {
+                full.append(delta)
+                onChunk(delta)
+            }
+        }
+        return full.toString().trim()
+    }
+
+    /**
      * Una petición suelta, fuera del chat (por ejemplo, traducir lo que hay que pintar).
      * Cierra la conversación en curso: después hay que llamar a [reset].
      */
