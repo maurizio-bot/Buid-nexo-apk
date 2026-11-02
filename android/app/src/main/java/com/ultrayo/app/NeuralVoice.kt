@@ -75,8 +75,20 @@ object NeuralVoice {
         // La primera vez el motor va más lento: se calienta con una palabra que no suena.
         runCatching { engine.generate("Hola.", sid = 0, speed = 1f) }
         val rate = engine.sampleRate()
+        tts = engine
+        sampleRate = rate
+        track = buildTrack(rate)
+        ready = true
+        Thread(::playLoop, "voz-neural").apply { isDaemon = true }.start()
+    }
+
+    /** La voz va por el canal de llamadas si el manos libres está enlazado ([AudioRoute.callMode]). */
+    private var trackCallMode = false
+
+    private fun buildTrack(rate: Int): AudioTrack {
+        trackCallMode = AudioRoute.callMode
         val minBuffer = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT)
-        val audio = AudioTrack.Builder()
+        return AudioTrack.Builder()
             .setAudioAttributes(AudioRoute.speechAttributes())
             .setAudioFormat(
                 AudioFormat.Builder()
@@ -89,11 +101,18 @@ object NeuralVoice {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
             .build()
-        tts = engine
-        track = audio
-        sampleRate = rate
-        ready = true
-        Thread(::playLoop, "voz-neural").apply { isDaemon = true }.start()
+    }
+
+    /** Si se ha enlazado o soltado el manos libres desde la última frase, rehace el reproductor. Con [lock]. */
+    private fun currentTrack(): AudioTrack? {
+        val old = track ?: return null
+        if (trackCallMode == AudioRoute.callMode || old.playState == AudioTrack.PLAYSTATE_PLAYING) return old
+        runCatching { old.release() }
+        return buildTrack(sampleRate).also {
+            track = it
+            framesWritten = 0
+            baseHead = 0
+        }
     }
 
     /** Pone [text] en la cola: suena en cuanto acabe lo anterior. [speed] 1 = normal. */
@@ -135,11 +154,11 @@ object NeuralVoice {
     }
 
     private fun playLoop() {
-        val audio = track ?: return
         while (true) {
             val item = playQueue.take()
+            val audio = synchronized(lock) { track } ?: continue
             when (item) {
-                is Chunk -> write(audio, item)
+                is Chunk -> write(item)
                 is End -> {
                     // Espera a que suene de verdad el final de la frase (con un límite por si el audio se atasca).
                     val deadline = System.currentTimeMillis() + 2000 + synchronized(lock) { framesWritten } * 1000 / sampleRate
@@ -163,12 +182,13 @@ object NeuralVoice {
 
     private fun head(audio: AudioTrack): Long = audio.playbackHeadPosition.toLong() and 0xffffffffL
 
-    private fun write(audio: AudioTrack, chunk: Chunk) {
+    private fun write(chunk: Chunk) {
         var offset = 0
         val samples = chunk.samples
         while (offset < samples.size) {
             val written = synchronized(lock) {
                 if (chunk.gen != generation) return
+                val audio = currentTrack() ?: return
                 if (audio.playState != AudioTrack.PLAYSTATE_PLAYING) {
                     audio.preferredDevice = AudioRoute.output
                     audio.play()
