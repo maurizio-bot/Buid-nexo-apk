@@ -280,7 +280,7 @@ object QuickActions {
 
     private fun message(c: Context, t: String): String? {
         val m = Regex(
-            "^(?:manda(?:le)?|env[ií]a(?:le)?|escribe(?:le)?|dile)(?: un)?(?: (whatsapp|wasap|guasap|mensaje|sms))?(?: de whatsapp)? a (.+?)" +
+            "^(?:m[aá]nda(?:le)?|env[ií]a(?:le)?|escr[ií]be(?:le)?|d[ií]le)(?: un)?(?: (whatsapp|wasap|guasap|mensaje|sms))?(?: de whatsapp)? a (.+?)" +
                 "(?: por (whatsapp|wasap|sms|mensaje))?(?:,|:| que dice| diciendo| que| con el texto)\\s+(.+)$",
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
         ).find(t) ?: return null

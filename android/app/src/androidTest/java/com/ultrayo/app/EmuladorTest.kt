@@ -1,6 +1,5 @@
 package com.ultrayo.app
 
-import android.content.Intent
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -37,10 +36,15 @@ class EmuladorTest {
     private fun openApp() {
         device.wakeUp()
         runCatching { device.executeShellCommand("wm dismiss-keyguard") }
-        val intent = context.packageManager.getLaunchIntentForPackage(pkg)!!
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        context.startActivity(intent)
-        assertTrue("La app no se abrió", device.wait(Until.hasObject(By.pkg(pkg).depth(0)), 20_000))
+        // Otra app (Chrome la primera vez, Ajustes…) puede quedarse delante: se vuelve con "am start",
+        // que no tiene las limitaciones de abrir actividades desde segundo plano, y se reintenta.
+        for (attempt in 1..3) {
+            device.executeShellCommand("am start -W -n $pkg/.MainActivity")
+            if (device.wait(Until.hasObject(By.pkg(pkg).depth(0)), 10_000)) break
+            device.pressBack()
+            device.pressHome()
+        }
+        assertEquals("La app no se abrió", pkg, device.currentPackageName)
         assertTrue("No sale la cabecera ULTRA YO", device.wait(Until.hasObject(By.text("ULTRA YO")), 20_000))
     }
 
@@ -147,8 +151,10 @@ class EmuladorTest {
         openApp()
         // Sin contactos en el emulador: tiene que decir que no lo encuentra, nunca llamar ni cerrarse.
         ask("llama a Pepe Pérez")
-        ask("mándale un whatsapp a Pepe que llego tarde")
-        ask("mándale un SMS a Pepe que llego tarde")
+        // Con tilde, como lo escribe el dictado: tiene que ser una orden directa, no ir al modelo.
+        assertTrue(ask("Mándale un whatsapp a Pepe que llego tarde").startsWith("No encuentro a Pepe"))
+        assertTrue(ask("mándale un SMS a Pepe que llego tarde").startsWith("No encuentro a Pepe"))
+        assertTrue(ask("envíale un mensaje a Pepe: llego tarde").startsWith("No encuentro a Pepe"))
         // Una acción con confirmación: se cancela.
         ask("crea una habilidad llamada saludo: di hola con energía")
         ask("no")
