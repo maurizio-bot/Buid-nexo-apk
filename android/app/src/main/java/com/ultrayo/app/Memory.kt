@@ -6,6 +6,9 @@ import org.json.JSONObject
 
 private const val MAX_UNDO = 20
 
+/** Fichas que el modelo tiene siempre presentes (las más usadas); el resto se encuentran igual al nombrarlas. */
+private const val MAX_INDEX = 25
+
 private const val DEFAULT_PERSONALITY = """Eres Ultra Yo, el asistente personal de Maurizio, al estilo de Jarvis.
 Le ayudas sobre todo a desarrollar sus proyectos.
 Hablas en español, con un tono cercano y directo.
@@ -187,6 +190,12 @@ class Memory(context: Context) {
         if (learned.isNotEmpty()) {
             append("\nLo que has aprendido tú de Maurizio (reglas y preferencias; las correcciones mandan):\n")
             learned.forEach { append("- ").append(it.text).append('\n') }
+        }
+        val cards = runCatching { Cards.get(appContext).ranked().take(MAX_INDEX) }.getOrDefault(emptyList())
+        if (cards.isNotEmpty()) {
+            append("\nTus fichas (proyectos, personas y lugares que conoces). Cuando Maurizio nombra una, te paso su detalle ")
+            append("junto a la pregunta; si necesitas más, usa leerFicha. Lo nuevo y duradero sobre ellas apúntalo con apuntarEnFicha:\n")
+            cards.forEach { append("- ").append(it.indexLine()).append('\n') }
         }
         append("\nPara lo que aprendiste antes sobre un tema, usa recordar.")
     }

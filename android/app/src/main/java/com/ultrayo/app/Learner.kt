@@ -1,11 +1,13 @@
 package com.ultrayo.app
 
 import android.content.Context
+import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 /**
  * Ultra Yo aprende sola de lo que habla con Maurizio (nunca toca nada del teléfono para ello):
@@ -39,7 +41,72 @@ object Learner {
     )
 
     fun init(context: Context) {
+        val first = !::app.isInitialized
         app = context.applicationContext
+        if (first) main.postDelayed(nightCheck, NIGHT_CHECK_MS)
+    }
+
+    // --- Repaso nocturno ("dormir") ---
+
+    private const val NIGHT_CHECK_MS = 20 * 60_000L
+    private const val MAX_NIGHT_CARDS = 12
+
+    private val nightCheck = object : Runnable {
+        override fun run() {
+            runCatching { if (shouldSleep()) consolidate() }
+            main.postDelayed(this, NIGHT_CHECK_MS)
+        }
+    }
+
+    private fun today(): String = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(java.util.Date())
+
+    /** De madrugada, cargando, sin estar hablando y una sola vez por noche. */
+    private fun shouldSleep(): Boolean {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (hour !in 1..5 || !recall.learning) return false
+        if (Assistant.thinking || Assistant.speaking || Assistant.listening || Ai.brain == null) return false
+        val charging = app.getSystemService(BatteryManager::class.java)?.isCharging == true
+        val prefs = app.getSharedPreferences("ultrayo", Context.MODE_PRIVATE)
+        return charging && prefs.getString("ultimo_repaso", "") != today()
+    }
+
+    /**
+     * Como cuando un humano duerme: repasa lo que quedó de la conversación, rehace el resumen de las
+     * fichas que han cambiado con todo lo que sabe de ellas y ordena la memoria (fusiona y olvida).
+     * También se puede lanzar a mano desde Ajustes. [done] recibe cuántas fichas repasó.
+     */
+    fun consolidate(done: ((Int) -> Unit)? = null) {
+        app.getSharedPreferences("ultrayo", Context.MODE_PRIVATE).edit().putString("ultimo_repaso", today()).apply()
+        review()
+        val brain = Ai.brain ?: return run { done?.invoke(0) }
+        val cards = Cards.get(app)
+        val since = app.getSharedPreferences("ultrayo", Context.MODE_PRIVATE).getLong("repaso_desde", 0L)
+        val pending = cards.ranked().filter { it.used >= since || it.summary.isBlank() }.take(MAX_NIGHT_CARDS)
+        scope.launch {
+            var updated = 0
+            for (f in pending) {
+                if (Assistant.thinking || Assistant.speaking || Assistant.listening) break
+                val facts = cards.details(f, f.name, k = 15).all
+                if (facts.isEmpty()) continue
+                val summary = runCatching {
+                    withContext(Ai.thread) {
+                        brain.answerOnce(
+                            "Resume en una sola frase de menos de 25 palabras qué es ${f.name} y lo más importante de su estado " +
+                                "actual, usando solo estas notas. Sin introducción, solo la frase.",
+                            facts.joinToString("\n") { "- $it" },
+                        )
+                    }
+                }.getOrNull()?.lines()?.firstOrNull { it.isNotBlank() }?.trim()?.trim('"', '-', ' ') ?: continue
+                if (summary.length in 10..300) {
+                    cards.setSummary(f.id, summary)
+                    updated++
+                }
+            }
+            withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { recall.maintain() } }
+            app.getSharedPreferences("ultrayo", Context.MODE_PRIVATE).edit().putLong("repaso_desde", System.currentTimeMillis()).apply()
+            Assistant.brainDirty = true
+            done?.invoke(updated)
+        }
     }
 
     private val recall get() = Recall.get(app)
@@ -89,14 +156,24 @@ object Learner {
                             "sobre Maurizio para el futuro: sus preferencias, cómo quiere que hagas las cosas, decisiones que tomó, " +
                             "sus proyectos y datos personales que él mismo dijo. Una idea por línea, empezando por \"- \", en " +
                             "tercera persona y en menos de 25 palabras. Nada de lo que solo importaba en esta conversación, " +
-                            "nada inventado ni deducido. Si no hay nada que valga la pena, escribe solo: NADA",
+                            "nada inventado ni deducido. Si un dato es de un proyecto, persona o lugar concreto, empieza la línea " +
+                            "por su nombre y dos puntos (por ejemplo \"- Proyecto1: usa una base de datos SQLite\"). Además, por " +
+                            "cada proyecto, persona o lugar del que hablen, añade una línea así: FICHA: nombre | tipo (proyecto, " +
+                            "persona, lugar o empresa) | qué es, en menos de 20 palabras. Si no hay nada que valga la pena, escribe solo: NADA",
                         dialog,
                     )
                 }
             }.getOrNull() ?: return@launch
             Assistant.brainDirty = true
             var learned = 0
-            notes.lines().map { it.trim() }.filter { it.startsWith("-") || it.startsWith("•") }.forEach { line ->
+            val cards = Cards.get(app)
+            notes.lines().map { it.trim().trimStart('-', '•', ' ') }.filter { it.startsWith("FICHA:", ignoreCase = true) }.forEach { line ->
+                val parts = line.substringAfter(':').split('|').map { it.trim() }
+                val name = parts.getOrNull(0).orEmpty()
+                if (name.length in 2..40 && name.split(' ').size <= 5 && cards.upsert(name, parts.getOrElse(1) { "" }, parts.getOrElse(2) { "" }).second) learned++
+            }
+            notes.lines().map { it.trim() }.filter { it.startsWith("-") || it.startsWith("•") }
+                .filterNot { it.trimStart('-', '•', ' ').startsWith("FICHA:", ignoreCase = true) }.forEach { line ->
                 val fact = line.trimStart('-', '•', ' ').trim()
                 if (fact.length !in 8..220 || fact.equals("NADA", ignoreCase = true)) return@forEach
                 val preference = Regex("prefiere|le gusta|no le gusta|quiere que|no quiere|odia|siempre|nunca", RegexOption.IGNORE_CASE).containsMatchIn(fact)
