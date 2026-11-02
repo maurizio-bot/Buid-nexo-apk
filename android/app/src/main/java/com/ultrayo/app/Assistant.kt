@@ -156,7 +156,24 @@ object Assistant {
             return@Ear
         }
         stopSpeaking()
+        listenWithAndroid(onHeard, onNothing, onFailed, retried = false)
+    }
+
+    /** Si pedir el reconocimiento sin red falló una vez en este teléfono, ya no se pide. */
+    private var offlineFails = false
+
+    /**
+     * Escucha una frase. Si el reconocedor falla al arrancar (error 5 de cliente, ocupado, idioma sin
+     * red…), lo cierra, crea uno nuevo y lo intenta otra vez sin pedir modo sin red.
+     */
+    private fun listenWithAndroid(
+        onHeard: (String) -> Unit,
+        onNothing: () -> Unit,
+        onFailed: (Int) -> Unit,
+        retried: Boolean,
+    ) {
         val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(app).also { recognizer = it }
+        var heardSomething = false
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 listening = true
@@ -177,11 +194,26 @@ object Assistant {
                         status = ""
                         onNothing()
                     }
+                    SpeechRecognizer.ERROR_CLIENT, SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+                    SpeechRecognizer.ERROR_SERVER_DISCONNECTED, SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
+                    SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE, SpeechRecognizer.ERROR_SERVER,
+                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
+                        if (retried || heardSomething) {
+                            onFailed(error)
+                        } else {
+                            offlineFails = true
+                            recognizer?.destroy()
+                            recognizer = null
+                            main.postDelayed({ listenWithAndroid(onHeard, onNothing, onFailed, retried = true) }, 250)
+                        }
+                    }
                     else -> onFailed(error)
                 }
             }
 
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() {
+                heardSomething = true
+            }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
@@ -191,8 +223,9 @@ object Assistant {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
-            // Reconocer dentro del teléfono si se puede: no espera a la red.
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, app.packageName)
+            // Reconocer dentro del teléfono si se puede (no espera a la red), salvo que ya haya fallado.
+            if (!offlineFails && !retried) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         }
         r.startListening(intent)
     }
@@ -212,7 +245,13 @@ object Assistant {
             },
             onNothing = onEnd,
             onFailed = { error ->
-                status = "Error del micrófono ($error)"
+                status = when (error) {
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Necesito permiso para usar el micrófono."
+                    SpeechRecognizer.ERROR_AUDIO -> "Otra app está usando el micrófono."
+                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER ->
+                        "El reconocedor de voz necesita internet o el paquete de español sin conexión."
+                    else -> "El reconocedor de voz no arrancó ($error). Toca el reactor otra vez."
+                }
                 onEnd()
             },
         )
