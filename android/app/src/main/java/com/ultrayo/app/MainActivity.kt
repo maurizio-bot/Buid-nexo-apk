@@ -780,6 +780,8 @@ class MainActivity : ComponentActivity() {
 
         LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { ControlCard() }
+            item { BrainCard() }
+            item { ExpertCard() }
             item {
                 Card {
                     SectionTitle("Voz")
@@ -1118,6 +1120,147 @@ class MainActivity : ComponentActivity() {
                     Text("Falló: ${s.message}", color = UltraColors.Muted)
                     GlowButton("Reintentar", onClick = { Painter.retry(this@MainActivity) }, Modifier.fillMaxWidth())
                 }
+            }
+        }
+    }
+
+    /** Qué cerebro usa (ligero, listo o uno entrenado por Maurizio) y si usa la GPU. */
+    @Composable
+    private fun BrainCard() {
+        var tick by remember { mutableStateOf(0) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(1000)
+                tick++
+                // Cuando termina de bajar el cerebro elegido, se cambia a él solo.
+                val chosen = BrainModel.selected(this@MainActivity)
+                if (brainReady && Assistant.brainModel != chosen && ModelDownloader(this@MainActivity, chosen).isReady()) {
+                    Assistant.reloadBrain { maybeStartWake() }
+                }
+            }
+        }
+        val selected = remember(tick) { BrainModel.selected(this@MainActivity) }
+        val current = Assistant.brainModel
+        val onGpu = remember(tick) { Ai.brain?.onGpu == true }
+        var gpu by remember { mutableStateOf(GpuGuard.wanted(this@MainActivity)) }
+        Card {
+            SectionTitle(
+                "Cerebro",
+                "Todos funcionan dentro del teléfono, sin internet. Uno más grande razona mejor; ocupa más y tarda algo más en arrancar.",
+            )
+            Text(
+                if (current != null && brainReady) "Ahora: ${current.label}, en la ${if (onGpu) "GPU" else "CPU (procesador)"}."
+                else "Cargando el cerebro…",
+                color = UltraColors.Text,
+                fontSize = 13.sp,
+            )
+            BrainModel.entries.forEach { model ->
+                val downloader = remember(tick, model) { ModelDownloader(this@MainActivity, model) }
+                val state = remember(tick, model) { runCatching { downloader.state() }.getOrDefault(DownloadState.None) }
+                Column(Modifier.fillMaxWidth()) {
+                    Text(
+                        (if (model == current) "● " else "○ ") + model.label + if (model.sizeGb.isNotEmpty()) " · ${model.sizeGb}" else "",
+                        color = if (model == current) UltraColors.Accent else UltraColors.Text,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(model.description, color = UltraColors.Muted, fontSize = 13.sp)
+                    when {
+                        model == current -> {}
+                        state == DownloadState.Done -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = {
+                                BrainModel.select(this@MainActivity, model)
+                                Assistant.reloadBrain { maybeStartWake() }
+                                tick++
+                            }) { Text("Usar este") }
+                            if (model != BrainModel.CUSTOM && model != BrainModel.LIGHT) {
+                                TextButton(onClick = {
+                                    downloader.delete()
+                                    if (selected == model) BrainModel.select(this@MainActivity, current ?: BrainModel.LIGHT)
+                                    tick++
+                                }) { Text("Borrar (liberar espacio)") }
+                            }
+                        }
+                        state is DownloadState.Running -> {
+                            Text("Descargando… ${(state.progress * 100).toInt()} %. Al terminar se cambia solo.", color = UltraColors.Accent, fontSize = 13.sp)
+                            LinearProgressIndicator(
+                                progress = { state.progress },
+                                color = UltraColors.AccentBright,
+                                trackColor = UltraColors.Glass,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(CircleShape),
+                            )
+                        }
+                        model == BrainModel.CUSTOM ->
+                            Text("📂  Copia tu .litertlm en ${Vault.path(this@MainActivity)}/modelos", color = UltraColors.Muted, fontSize = 13.sp)
+                        else -> TextButton(onClick = {
+                            runCatching {
+                                downloader.start()
+                                BrainModel.select(this@MainActivity, model)
+                            }.onFailure { status = "No pude empezar la descarga: ${it.message}" }
+                            tick++
+                        }) {
+                            Text(if (state is DownloadState.Failed) "Reintentar descarga (falló: ${state.reason})" else "Descargar y usar (mejor con wifi)")
+                        }
+                    }
+                }
+            }
+            SettingSwitch(
+                "Usar la GPU",
+                if (GpuGuard.broken(this@MainActivity) && gpu) "La GPU falló en este teléfono y ahora usa el procesador. Apaga y enciende para volver a probar."
+                else "Empieza a contestar mucho antes, sobre todo con el cerebro listo. Si la GPU fallara, vuelve sola al procesador.",
+                gpu,
+            ) {
+                GpuGuard.setWanted(this@MainActivity, it)
+                gpu = it
+                Assistant.reloadBrain { maybeStartWake() }
+            }
+            var training by remember { mutableStateOf(TrainingLog.enabled(this@MainActivity)) }
+            val saved = remember(tick / 10) { TrainingLog.count(this@MainActivity) }
+            SettingSwitch(
+                "Guardar conversaciones para entrenarla",
+                "Se quedan en tu carpeta (entrenamiento/conversaciones.jsonl, $saved guardadas). Con ellas puedes ajustarla gratis en Google Colab: guía en el repo, carpeta entrenamiento.",
+                training,
+            ) {
+                TrainingLog.setEnabled(this@MainActivity, it)
+                training = it
+            }
+            if (saved > 0) TextButton(onClick = { TrainingLog.clear(this@MainActivity); tick += 10 }) { Text("Borrar conversaciones guardadas") }
+        }
+    }
+
+    /** Modo experto en la nube: apagado por defecto, con la clave gratuita de Maurizio. */
+    @Composable
+    private fun ExpertCard() {
+        var on by remember { mutableStateOf(Expert.enabled(this@MainActivity)) }
+        var key by remember { mutableStateOf(Expert.key(this@MainActivity)) }
+        Card {
+            SectionTitle(
+                "Modo experto (nube)",
+                "Para lo muy difícil. Solo se usa cuando dices \"modo experto: …\". Manda esa pregunta y las últimas frases del chat a Gemini de Google (plan gratuito). Lo demás sigue siendo 100 % local.",
+            )
+            SettingSwitch("Permitir el modo experto", if (on) "Activado: solo cuando tú lo pidas." else "Apagado: nada sale del teléfono.", on) {
+                Expert.setEnabled(this@MainActivity, it)
+                on = it
+            }
+            if (on) {
+                Text(
+                    "Clave gratuita: entra en aistudio.google.com con tu cuenta de Google, \"Get API key\" → crear clave, y pégala aquí. No se paga nada mientras no actives facturación.",
+                    color = UltraColors.Muted,
+                    fontSize = 13.sp,
+                )
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = {
+                        key = it
+                        Expert.setKey(this@MainActivity, it)
+                    },
+                    label = { Text("Clave de Google AI Studio") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }

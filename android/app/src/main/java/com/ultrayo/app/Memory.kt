@@ -141,7 +141,10 @@ class Memory(context: Context) {
                 "el teléfono, hazlo con tus herramientas en vez de explicarle cómo: accionTelefono para llamar, mensajes, " +
                 "alarmas, temporizadores, Maps, música, linterna o volumen; y dentro de cualquier app, leerPantalla, pulsar, " +
                 "escribirEnPantalla, desplazar y botonSistema. Nunca hagas nada en el teléfono que no te haya pedido. Lo que " +
-                "envía, paga, llama o borra lo confirma él con un sí: dile en una frase lo que vas a hacer."
+                "envía, paga, llama o borra lo confirma él con un sí: dile en una frase lo que vas a hacer." +
+                "\n\nComprueba en vez de suponer: para cualquier cuenta usa calcular; para datos actuales, noticias, precios " +
+                "o algo que no sabes seguro usa buscarWeb (y leerWeb para leer una página); para lo que esté en sus documentos " +
+                "usa buscarEnDocumentos y di de qué archivo sale. Si después de buscar sigues sin saberlo, dilo."
         )
         append(
             "\n\nPuedes usar herramientas para ver qué apps hay en el teléfono y abrirlas; para buscar fotos, vídeos, " +
