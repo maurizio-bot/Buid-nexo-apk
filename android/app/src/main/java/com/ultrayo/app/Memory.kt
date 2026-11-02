@@ -32,6 +32,16 @@ class Memory(context: Context) {
         get() = prefs.getBoolean("voice_replies", true)
         set(value) = prefs.edit().putBoolean("voice_replies", value).apply()
 
+    /** Usar la voz rápida (oído y voz neural dentro del teléfono) cuando está descargada. */
+    var fastVoice: Boolean
+        get() = prefs.getBoolean("fast_voice", true)
+        set(value) = prefs.edit().putBoolean("fast_voice", value).apply()
+
+    /** Poder interrumpirla hablando mientras contesta (necesita la voz rápida). */
+    var bargeIn: Boolean
+        get() = prefs.getBoolean("barge_in", true)
+        set(value) = prefs.edit().putBoolean("barge_in", value).apply()
+
     /** Escuchar la palabra "Ultra" en segundo plano. */
     var wakeWord: Boolean
         get() = prefs.getBoolean("wake_word", true)

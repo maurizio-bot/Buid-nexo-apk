@@ -205,6 +205,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         refreshDownload()
+        // La voz rápida se descarga sola la primera vez (si no se ha apagado en Ajustes).
+        if (memory.fastVoice) Assistant.downloadFastVoice()
     }
 
     override fun onResume() {
@@ -792,6 +794,7 @@ class MainActivity : ComponentActivity() {
                         "Aunque la app esté cerrada o el teléfono bloqueado. Deja un aviso fijo mientras escucha.",
                         wakeOn,
                     ) { setWake(it) }
+                    FastVoiceSettings()
                     SettingSwitch(
                         "Contestar en voz alta",
                         "Si lo apagas, contesta por escrito. También puedes decirle \"modo texto\" o \"modo voz\".",
@@ -945,6 +948,56 @@ class MainActivity : ComponentActivity() {
                 }
             }
             item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+
+    /** La voz rápida: oído y voz neural dentro del teléfono (sherpa-onnx). */
+    @Composable
+    private fun FastVoiceSettings() {
+        var fast by remember { mutableStateOf(memory.fastVoice) }
+        var bargeIn by remember { mutableStateOf(memory.bargeIn) }
+        val ready = Assistant.fastVoiceReady
+        val progress = VoiceModels.progress
+        val downloading = VoiceModels.downloading
+        Text(
+            when {
+                ready -> "Voz rápida lista: te oye y te habla dentro del teléfono, sin internet."
+                downloading != null -> "Descargando el ${downloading.label}… ${((progress ?: 0f) * 100).toInt()} %"
+                VoiceModels.allReady(this@MainActivity) -> "Cargando la voz rápida…"
+                else -> "Voz rápida sin descargar (unos 140 MB, una sola vez). Mientras, usa la voz de Android."
+            },
+            color = if (ready) UltraColors.Accent else UltraColors.Muted,
+            fontSize = 13.sp,
+        )
+        if (downloading != null) {
+            LinearProgressIndicator(
+                progress = { progress ?: 0f },
+                color = UltraColors.AccentBright,
+                trackColor = UltraColors.Glass,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else if (!VoiceModels.allReady(this@MainActivity)) {
+            GlowButton("Descargar voz rápida", onClick = { Assistant.downloadFastVoice() }, Modifier.fillMaxWidth())
+        }
+        SettingSwitch(
+            "Voz rápida",
+            "Reconoce mientras hablas y contesta con voz neural, todo en el teléfono. Si la apagas, usa el reconocedor y la voz de Android.",
+            fast,
+        ) {
+            memory.fastVoice = it
+            fast = it
+            if (it) Assistant.downloadFastVoice()
+        }
+        SettingSwitch(
+            "Interrumpirla hablando",
+            "Mientras contesta, si le hablas se calla y te escucha. Si se corta sola por su propio eco, apágalo.",
+            bargeIn,
+        ) {
+            memory.bargeIn = it
+            bargeIn = it
+        }
+        if (ready) {
+            TextButton(onClick = { Assistant.say("Hola, Maurizio. Así sueno ahora, sin internet.") }) { Text("Probar la voz") }
         }
     }
 

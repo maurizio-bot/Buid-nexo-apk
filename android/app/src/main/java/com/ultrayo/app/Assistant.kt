@@ -82,6 +82,10 @@ object Assistant {
     private val main = Handler(Looper.getMainLooper())
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+
+    /** La voz rápida (oído y voz neural dentro del teléfono) ya está cargada. */
+    var fastVoiceReady by mutableStateOf(false)
+        private set
     private var recognizer: SpeechRecognizer? = null
     private var afterSpeech: (() -> Unit)? = null
     private var loading = false
@@ -118,7 +122,49 @@ object Assistant {
                 override fun onError(utteranceId: String?) = main.post { utteranceDone(utteranceId) }.let {}
             })
         }
+        NeuralVoice.onDone = { utteranceDone(it) }
+        loadFastVoice()
     }
+
+    /** Carga la voz rápida si ya está descargada (fuera del hilo principal; tarda uno o dos segundos). */
+    fun loadFastVoice() {
+        if (fastVoiceReady || !VoiceModels.allReady(app)) return
+        Thread {
+            val error = runCatching {
+                NeuralEar.load(app)
+                NeuralVoice.load(app)
+            }.exceptionOrNull()
+            main.post {
+                fastVoiceReady = NeuralEar.ready && NeuralVoice.ready
+                if (error != null) status = "No pude cargar la voz rápida (${error.message}). Sigo con la de Android."
+            }
+        }.apply { name = "carga-voz" }.start()
+    }
+
+    private var fetchingVoice = false
+
+    /** Descarga la voz rápida si falta (unos 140 MB, una sola vez) y la carga. */
+    fun downloadFastVoice() {
+        if (VoiceModels.allReady(app)) return loadFastVoice()
+        if (fetchingVoice) return
+        fetchingVoice = true
+        scope.launch {
+            try {
+                VoiceModels.downloadAll(app)
+                loadFastVoice()
+            } catch (e: Exception) {
+                status = "No pude descargar la voz rápida (${e.message}). Sigo con la de Android."
+            } finally {
+                fetchingVoice = false
+            }
+        }
+    }
+
+    private fun neuralVoiceOn() = memory.fastVoice && NeuralVoice.ready
+    private fun neuralEarOn() = memory.fastVoice && NeuralEar.ready
+
+    /** Puede contestar en voz alta (con la voz neural o, si no, con la de Android). */
+    private fun voiceReady() = neuralVoiceOn() || ttsReady
 
     fun locked() = app.getSystemService(KeyguardManager::class.java).isKeyguardLocked
 
@@ -192,13 +238,41 @@ object Assistant {
 
     // --- Oír y hablar ---
 
+    /** El oído rápido (dentro del teléfono, en streaming). Si no puede abrir el micrófono, usa el de Android. */
+    val neuralEar = Ear { onHeard, onNothing, onFailed ->
+        cutSpeech()
+        listening = true
+        status = "Te escucho…"
+        NeuralEar.listen(
+            onPartial = { status = "🎙 $it" },
+            onHeard = { text ->
+                listening = false
+                status = ""
+                onHeard(text)
+            },
+            onNothing = {
+                listening = false
+                status = ""
+                onNothing()
+            },
+            onFailed = { _ ->
+                listening = false
+                status = ""
+                androidEar.listen(onHeard, onNothing, onFailed)
+            },
+        )
+    }
+
+    /** El mejor oído disponible: el rápido si está descargado y activado; si no, el de Android. */
+    fun bestEar(): Ear = if (neuralEarOn()) neuralEar else androidEar
+
     /** Escucha una frase con el reconocedor de voz de Android. */
     val androidEar = Ear { onHeard, onNothing, onFailed ->
         if (!SpeechRecognizer.isRecognitionAvailable(app)) {
             onFailed(-1)
             return@Ear
         }
-        stopSpeaking()
+        cutSpeech()
         listenWithAndroid(onHeard, onNothing, onFailed, retried = false)
     }
 
@@ -275,17 +349,16 @@ object Assistant {
 
     fun stopListening() {
         recognizer?.stopListening()
+        NeuralEar.finish()
     }
 
     /**
      * Conversación por voz: escucha, responde en voz alta y vuelve a escuchar,
      * hasta que Maurizio se calla. Entonces llama a [onEnd].
      */
-    fun converse(ear: Ear = androidEar, onEnd: () -> Unit = {}) {
+    fun converse(ear: Ear = bestEar(), onEnd: () -> Unit = {}) {
         ear.listen(
-            onHeard = { text ->
-                send(text) { if (memory.voiceReplies) converse(ear, onEnd) else onEnd() }
-            },
+            onHeard = { text -> reply(text, ear, onEnd) },
             onNothing = onEnd,
             onFailed = { error ->
                 status = when (error) {
@@ -300,15 +373,103 @@ object Assistant {
         )
     }
 
+    /**
+     * Contesta a lo que oyó y vuelve a escuchar. Mientras habla, si la voz rápida está activa, se le puede
+     * interrumpir hablando: lo que diga Maurizio la calla y pasa a ser la siguiente pregunta.
+     */
+    private fun reply(text: String, ear: Ear, onEnd: () -> Unit) {
+        bargeIn = if (neuralEarOn() && memory.bargeIn) { heard -> reply(heard, ear, onEnd) } else null
+        send(text) {
+            bargeIn = null
+            if (memory.voiceReplies) converse(ear, onEnd) else onEnd()
+        }
+    }
+
+    // --- Interrumpir hablando ---
+
+    /** Qué hacer con lo que diga Maurizio si la interrumpe (solo mientras conversa por voz). */
+    private var bargeIn: ((String) -> Unit)? = null
+    private var watching = false
+
+    /** Lo último que ha dicho Ultra en voz alta, para no confundir su propio eco con Maurizio. */
+    private val spokenWords = ArrayDeque<String>()
+
+    private val stopWords = Regex("^(para|calla|c[aá]llate|basta|silencio|stop|espera|vale ya|ya est[aá])\\b", RegexOption.IGNORE_CASE)
+
+    private fun words(text: String): List<String> =
+        java.text.Normalizer.normalize(text.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .split(Regex("[^a-z0-9ñ]+"))
+            .filter { it.isNotEmpty() }
+
+    private fun rememberSpoken(text: String) {
+        spokenWords.addAll(words(text))
+        while (spokenWords.size > 120) spokenWords.removeFirst()
+    }
+
+    /** Es eco si casi todo lo oído son palabras que acaba de decir Ultra. */
+    private fun isEcho(heard: String): Boolean {
+        val said = spokenWords.toHashSet()
+        val heardWords = words(heard)
+        if (heardWords.isEmpty()) return true
+        val fresh = heardWords.count { it !in said && it.length >= 3 }
+        if (stopWords.containsMatchIn(heard.trim()) && heardWords.size <= 3 && heardWords.first() !in said) return false
+        return fresh < 2
+    }
+
+    private fun startWatching() {
+        val handler = bargeIn ?: return
+        if (watching || !NeuralEar.ready) return
+        watching = true
+        NeuralEar.watch(
+            isEcho = { heard -> synchronized(spokenWords) { isEcho(heard) } },
+            onInterrupt = {
+                if (!watching) return@watch
+                // Maurizio habla: Ultra se calla al instante y le escucha.
+                cutSpeech(fromBargeIn = true)
+                listening = true
+                status = "Te escucho…"
+            },
+            onPartial = { status = "🎙 $it" },
+            onHeard = { text ->
+                watching = false
+                listening = false
+                status = ""
+                if (stopWords.containsMatchIn(text.trim()) && words(text).size <= 3) {
+                    bargeIn = null
+                    onCut?.invoke()
+                } else {
+                    handler(text)
+                }
+            },
+            onNothing = {
+                watching = false
+                listening = false
+                status = ""
+                bargeIn = null
+                onCut?.invoke()
+            },
+        )
+    }
+
+    private fun stopWatching(then: (() -> Unit)? = null) {
+        if (!watching) {
+            then?.invoke()
+            return
+        }
+        watching = false
+        NeuralEar.cancel(then)
+    }
+
     /** Añade la respuesta al chat (con una [image] opcional) y la dice en voz alta, salvo en modo texto. [onDone] se llama al terminar. */
     fun say(text: String, onDone: (() -> Unit)? = null, image: String? = null) {
         turns.add(Turn("assistant", text, image = image))
         status = ""
-        if (!memory.voiceReplies || !ttsReady) {
+        if (!memory.voiceReplies || !voiceReady()) {
             onDone?.invoke()
             return
         }
-        stopSpeaking()
+        cutSpeech()
         afterSpeech = onDone
         speakPart(text)
         maybeFinishSpeech()
@@ -331,10 +492,17 @@ object Assistant {
     /** Pone [text] en la cola de la voz, sin cortar lo que ya está diciendo. */
     private fun speakPart(text: String) {
         val spoken = text.replace(Regex("[*#_`>|]"), "").replace(Regex("https?://\\S+"), "el enlace").trim()
-        if (spoken.isEmpty() || !ttsReady) return
+        if (spoken.isEmpty() || !voiceReady()) return
         queued++
         speaking = true
-        tts?.speak(spoken, TextToSpeech.QUEUE_ADD, null, "g${generation}_${utteranceSeq++}")
+        synchronized(spokenWords) { rememberSpoken(spoken) }
+        val id = "g${generation}_${utteranceSeq++}"
+        if (neuralVoiceOn()) {
+            NeuralVoice.speak(spoken, id, speed = 1.08f)
+        } else {
+            tts?.speak(spoken, TextToSpeech.QUEUE_ADD, null, id)
+        }
+        startWatching()
     }
 
     private fun utteranceDone(id: String?) {
@@ -347,23 +515,34 @@ object Assistant {
         if (queued == 0 && !streamOpen) finishSpeech()
     }
 
-    /** Corta la voz al instante (tocar el reactor, "para", el botón de parar). */
+    /** Corta la voz al instante y la conversación por voz en curso (botón Parar, tocar el reactor). */
     fun stopSpeaking() {
+        bargeIn = null
+        cutSpeech()
+    }
+
+    /** Corta lo que está diciendo (por ejemplo, para empezar otra respuesta) sin terminar la conversación. */
+    private fun cutSpeech(fromBargeIn: Boolean = false) {
         val cut = afterSpeech != null
         generation++
         queued = 0
         streamOpen = false
         afterSpeech = null
-        if (cut) onCut?.invoke()
+        // Si la ha interrumpido Maurizio hablando, el oído sigue abierto para escucharle.
+        if (!fromBargeIn) stopWatching()
+        if (cut && !fromBargeIn) onCut?.invoke()
         if (speaking) tts?.stop()
+        NeuralVoice.stop()
         speaking = false
+        synchronized(spokenWords) { spokenWords.clear() }
     }
 
     private fun finishSpeech() {
         speaking = false
         val next = afterSpeech
         afterSpeech = null
-        next?.invoke()
+        // El micrófono de interrumpir se suelta antes de volver a escuchar con el normal.
+        stopWatching { next?.invoke() }
     }
 
     /**
@@ -599,9 +778,9 @@ object Assistant {
         val systemPrompt = memory.systemPrompt()
 
         // La respuesta aparece y se dice según el modelo la escribe.
-        stopSpeaking()
+        cutSpeech()
         val gen = generation
-        val voice = memory.voiceReplies && ttsReady
+        val voice = memory.voiceReplies && voiceReady()
         if (voice) {
             streamOpen = true
             afterSpeech = onDone
