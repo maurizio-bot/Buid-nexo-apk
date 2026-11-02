@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Size
@@ -113,6 +114,15 @@ object DeviceFiles {
             )
             if (matches(f)) found += f
         }
+        // Con "acceso a todos los archivos": todo el almacenamiento del teléfono (Download, Documents, WhatsApp…)
+        if (found.size < limit && allFiles() && (words.isNotEmpty() || wantedKind != null)) {
+            val more = mutableListOf<FoundFile>()
+            walkPhone { f ->
+                if (matches(f) && found.none { it.name == f.name && it.size == f.size }) more += f
+                more.size < limit * 10
+            }
+            found += more.sortedByDescending { it.modified }.take(limit - found.size)
+        }
         if (found.size < limit) {
             for (root in Folders.list(context)) {
                 walkTree(context, root) { f ->
@@ -134,6 +144,56 @@ object DeviceFiles {
         val name = wanted.substringAfterLast('/')
         return search(context, name, limit = 20).firstOrNull { it.path == wanted }
             ?: search(context, name, limit = 20).firstOrNull { it.name.equals(name, ignoreCase = true) }
+    }
+
+    /** Olvida lo último encontrado (tras mover o borrar, las rutas viejas ya no valen). */
+    fun forget() = synchronized(recent) { recent.clear() }
+
+    /** Si Maurizio le ha dado "acceso a todos los archivos" (Android 11 o más). */
+    fun allFiles(): Boolean = Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()
+
+    /** La raíz del almacenamiento del teléfono (/storage/emulated/0). */
+    fun phoneRoot(): File = Environment.getExternalStorageDirectory()
+
+    /** El archivo de verdad detrás de una ruta encontrada, si se puede tocar directamente (para copiar, mover o borrar). */
+    fun realFile(file: FoundFile): File? {
+        if (file.uri.scheme == "file") return file.uri.path?.let(::File)
+        val first = file.path.substringBefore('/')
+        if (first == "Fotos" || first == "Vídeos" || first == "Audio") {
+            return File(phoneRoot(), file.path.substringAfter('/')).takeIf { it.exists() }
+        }
+        return null
+    }
+
+    /** Recorre todo el almacenamiento del teléfono (menos lo oculto y las carpetas privadas de otras apps). */
+    private fun walkPhone(visit: (FoundFile) -> Boolean) {
+        val root = phoneRoot()
+        val pending = ArrayDeque<Pair<File, Int>>()
+        pending.add(root to 0)
+        var visited = 0
+        while (pending.isNotEmpty() && visited < MAX_VISITED) {
+            val (dir, depth) = pending.removeFirst()
+            val children = dir.listFiles() ?: continue
+            for (f in children) {
+                visited++
+                if (f.name.startsWith(".")) continue
+                val rel = f.path.removePrefix(root.path).trimStart('/')
+                if (f.isDirectory) {
+                    if (depth < MAX_DEPTH && rel != "Android/data" && rel != "Android/obb") pending.add(f to depth + 1)
+                    continue
+                }
+                val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(DocReader.extension(f.name)) ?: ""
+                val found = FoundFile(
+                    path = "Teléfono/$rel",
+                    uri = Uri.fromFile(f),
+                    name = f.name,
+                    mime = mime,
+                    size = f.length(),
+                    modified = f.lastModified(),
+                )
+                if (!visit(found)) return
+            }
+        }
     }
 
     fun readText(context: Context, file: FoundFile, limit: Int = MAX_DOC_TEXT): String =

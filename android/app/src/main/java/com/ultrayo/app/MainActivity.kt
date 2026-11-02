@@ -155,6 +155,31 @@ class MainActivity : ComponentActivity() {
         mediaAccess = DeviceFiles.hasMedia(this)
     }
 
+    private var allFilesAccess by mutableStateOf(false)
+    private var readAccess by mutableStateOf(false)
+    private var notesAccess by mutableStateOf(false)
+
+    private val askRead = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        readAccess = PhoneData.readPermissions.all { PhoneData.granted(this, it) }
+    }
+
+    private fun refreshAccess() {
+        allFilesAccess = DeviceFiles.allFiles()
+        readAccess = PhoneData.readPermissions.all { PhoneData.granted(this, it) }
+        notesAccess = UltraNotifications.enabled(this)
+    }
+
+    /** Abre una pantalla de Ajustes de Android; si este teléfono no la tiene, la de la app. */
+    private fun openSettings(intent: Intent) {
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            runCatching {
+                startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            }
+        }
+    }
+
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             Folders.add(this, uri)
@@ -229,6 +254,7 @@ class MainActivity : ComponentActivity() {
         mediaAccess = DeviceFiles.hasMedia(this)
         controlOn = UltraAccessibility.instance != null
         phoneAccess = hasPhonePermissions()
+        refreshAccess()
         if (brainReady) maybeStartWake()
         // Con el teléfono bloqueado (abierta con el botón lateral) empieza a escuchar sola.
         val talk = talkRequested
@@ -840,9 +866,48 @@ class MainActivity : ComponentActivity() {
             item {
                 Card {
                     SectionTitle(
-                        "Archivos que puede leer",
-                        "Solo lectura: puede buscar fotos, vídeos, audios y documentos y leerlos (${DocReader.FORMATS}), nunca cambiarlos ni borrarlos.",
+                        "Acceso al teléfono",
+                        "Lee solo cuando se lo pides: archivos (${DocReader.FORMATS}), agenda, SMS, llamadas y notificaciones. " +
+                            "Copiar, mover o borrar fuera de su carpeta siempre te lo pregunta antes.",
                     )
+                    if (allFilesAccess) {
+                        Text("📂  Todos los archivos del teléfono", color = UltraColors.Text)
+                    } else if (Build.VERSION.SDK_INT >= 30) {
+                        GlowButton(
+                            "Acceso a todos los archivos",
+                            onClick = {
+                                openSettings(
+                                    Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))
+                                )
+                            },
+                            Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (readAccess) {
+                        Text("📅  Contactos, agenda, SMS y llamadas", color = UltraColors.Text)
+                    } else {
+                        GlowButton(
+                            "Leer contactos, agenda, SMS y llamadas",
+                            onClick = { askRead.launch(PhoneData.readPermissions) },
+                            Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (notesAccess) {
+                        Text("🔔  Notificaciones", color = UltraColors.Text)
+                    } else {
+                        GlowButton(
+                            "Leer notificaciones",
+                            onClick = { openSettings(UltraNotifications.settingsIntent(this@MainActivity)) },
+                            Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (!readAccess || !notesAccess) {
+                        Text(
+                            "Si Android dice que es un ajuste restringido: Ajustes > Aplicaciones > Ultra Yo > ⋮ > Permitir ajustes restringidos, y vuelve a pulsar.",
+                            color = UltraColors.Muted,
+                            fontSize = 13.sp,
+                        )
+                    }
                     if (mediaAccess) {
                         Text("🖼  Fotos, vídeos y audio de la galería", color = UltraColors.Text)
                     } else {
@@ -852,8 +917,8 @@ class MainActivity : ComponentActivity() {
                             Modifier.fillMaxWidth(),
                         )
                     }
-                    Text(
-                        "Para documentos y descargas, dale acceso a una carpeta (por ejemplo Download o Documents).",
+                    if (!allFilesAccess) Text(
+                        "O, en vez de todo, dale acceso solo a una carpeta (por ejemplo Download o Documents).",
                         color = UltraColors.Muted,
                         fontSize = 13.sp,
                     )

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Para abrir con otra app (visor de PDF, reproductor…) un archivo del teléfono o de la carpeta Ultra Yo -->
+<paths>
+    <external-path name="telefono" path="." />
+    <external-files-path name="app" path="." />
+    <files-path name="interna" path="." />
+</paths>

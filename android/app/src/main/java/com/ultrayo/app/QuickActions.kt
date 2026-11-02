@@ -42,6 +42,7 @@ object QuickActions {
         val c = context.applicationContext
         return try {
             info(c, text)
+                ?: phoneInfo(c, text)
                 ?: torch(c, text)
                 ?: volume(c, text)
                 ?: alarm(c, text)
@@ -80,6 +81,34 @@ object QuickActions {
             val level = c.getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             return "Te queda un $level % de batería."
         }
+        return null
+    }
+
+    /** Preguntas sobre el teléfono que se contestan leyendo, sin pasar por el modelo. */
+    private fun phoneInfo(c: Context, t: String): String? {
+        val n = norm(t)
+        if (locked(c)) return null
+        Regex("^(?:que |cuales )?(?:notificaciones|avisos) (?:tengo|hay|me han llegado)$|^(?:tengo notificaciones|que me ha llegado)$")
+            .find(n)?.let { return UltraNotifications.list(c, "", limit = 5) }
+        Regex("^(?:leeme|lee|dime|mira|ensename) (?:las |mis )?notificaciones(?: de (.+))?$").find(n)?.let {
+            return UltraNotifications.list(c, it.groupValues[1], limit = 5)
+        }
+        Regex("^(?:quien me ha llamado|quien me llamo|tengo llamadas perdidas|llamadas perdidas)$").find(n)?.let {
+            return PhoneData.calls(c, "perdidas", limit = 5)
+        }
+        Regex("^(?:ultimas llamadas|mis ultimas llamadas|registro de llamadas)$").find(n)?.let { return PhoneData.calls(c, "", limit = 5) }
+        Regex("^(?:que tengo|tengo algo|que hay en (?:la|mi) agenda|(?:mi )?agenda(?: de)?) (hoy|manana|pasado manana|esta semana)(?: en la agenda)?$").find(n)?.let {
+            return PhoneData.calendar(c, it.groupValues[1], limit = 6)
+        }
+        Regex("^(?:tengo )?sms sin leer$|^(?:tengo )?mensajes de texto sin leer$").find(n)?.let { return PhoneData.sms(c, "sin leer", limit = 5) }
+        Regex("^(?:mis )?ultimos sms$").find(n)?.let { return PhoneData.sms(c, "", limit = 5) }
+        if (Regex("^cuanto espacio (?:me queda|tengo|libre|hay|queda)(?: en el (?:telefono|movil))?$|^(?:cuanto )?almacenamiento(?: libre)?$").matches(n)) {
+            return "Tienes ${PhoneData.storage()}."
+        }
+        if (Regex("^(?:estoy conectado|tengo internet|tengo conexion|a que red estoy conectado|tengo wifi|estoy con wifi o datos)$").matches(n)) {
+            return "Estás con ${PhoneData.network(c)}."
+        }
+        if (Regex("^(?:como esta|estado del?) (?:el )?(?:telefono|movil|sistema)$").matches(n)) return PhoneData.system(c)
         return null
     }
 
