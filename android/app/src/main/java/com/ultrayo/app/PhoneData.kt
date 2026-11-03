@@ -68,6 +68,18 @@ object PhoneData {
 
     fun query(c: Context, what: String, filter: String, voice: Boolean = false): String {
         val limit = if (voice) 5 else 12
+        return try {
+            read(c, what, filter, limit)
+        } catch (e: SecurityException) {
+            "Android no me deja leer eso ahora (falta un permiso). Ábreme y te lo pido."
+        } catch (e: Exception) {
+            // Algunos teléfonos tienen la agenda o el registro de llamadas con columnas distintas.
+            ErrorLog.add("Fallo al consultar $what", e)
+            "No pude leer $what: ${Safe.describe(e)}."
+        }
+    }
+
+    private fun read(c: Context, what: String, filter: String, limit: Int): String {
         return when (kind(what)) {
             "contactos" -> contacts(c, filter, limit)
             "agenda" -> calendar(c, filter, limit)

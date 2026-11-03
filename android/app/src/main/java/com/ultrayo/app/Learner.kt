@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -22,7 +21,7 @@ object Learner {
     private const val MAX_TURNS = 14
 
     private val main = Handler(Looper.getMainLooper())
-    private val scope = MainScope()
+    private val scope = Safe.mainScope("aprendizaje")
     private lateinit var app: Context
 
     /** Por dónde va el chat ya revisado. */

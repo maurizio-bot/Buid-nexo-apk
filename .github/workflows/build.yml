@@ -25,6 +25,14 @@ jobs:
         run: ./scripts/motor-imagenes.sh
       - name: Traer el motor de voz
         run: ./scripts/motor-voz.sh
+      - uses: actions/cache@v4
+        with:
+          path: android/build/sentido-descarga
+          key: sentido-static-mrl-multilingual-v1
+      - name: Traer el sentido de las palabras (sinónimos)
+        run: ./scripts/modelo-sentido.sh
+      - name: Pruebas rápidas (lógica, sin teléfono)
+        run: ./gradlew testDebugUnitTest --no-daemon
       - run: ./gradlew assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
@@ -41,3 +49,54 @@ jobs:
             --title "Ultra Yo 0.2.${{ github.run_number }}" \
             --notes "Descarga ultra-yo.apk en el teléfono e instálalo." \
             $([ "${{ github.ref_name }}" = "main" ] || echo --prerelease)
+
+  # Abre la app en un emulador Android, recorre los ajustes y lanza órdenes directas sin el modelo.
+  # No sustituye al S24: no hay GPU/NPU, micrófono real, Bluetooth ni las librerías arm64 de voz.
+  emulador:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Traer el motor de imágenes
+        run: ./scripts/motor-imagenes.sh
+      - name: Traer el motor de voz
+        run: ./scripts/motor-voz.sh
+      - uses: actions/cache@v4
+        with:
+          path: android/build/sentido-descarga
+          key: sentido-static-mrl-multilingual-v1
+      - name: Traer el sentido de las palabras (sinónimos)
+        run: ./scripts/modelo-sentido.sh
+      - name: Compilar la app y las pruebas
+        run: ./gradlew assembleDebug assembleDebugAndroidTest --no-daemon
+      - name: Activar KVM para el emulador
+        working-directory: .
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Probar en el emulador (Android 14)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          disk-size: 6000M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          working-directory: android
+          script: ./scripts/prueba-emulador.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prueba-emulador
+          path: android/build/prueba-emulador

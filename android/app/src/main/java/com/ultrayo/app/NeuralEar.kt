@@ -120,10 +120,25 @@ object NeuralEar {
         val mine = ++session
         finishNow = false
         sessions.execute {
-            run(
-                mine, whileSpeaking = false, isEcho = { false }, onInterrupt = {},
-                onPartial = onPartial, onHeard = onHeard, onNothing = onNothing, onFailed = onFailed,
-            )
+            guarded(onFailed) {
+                run(
+                    mine, whileSpeaking = false, isEcho = { false }, onInterrupt = {},
+                    onPartial = onPartial, onHeard = onHeard, onNothing = onNothing, onFailed = onFailed,
+                )
+            }
+        }
+    }
+
+    /** Un fallo inesperado del oído (librería nativa, micrófono) no cierra la app: se apunta y se avisa. */
+    private inline fun guarded(crossinline onFailed: (Int) -> Unit, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: OutOfMemoryError) {
+            throw e
+        } catch (e: Throwable) {
+            active = false
+            ErrorLog.add("Fallo del oído rápido", e)
+            main.post { onFailed(-8) }
         }
     }
 
@@ -143,10 +158,10 @@ object NeuralEar {
         finishNow = false
         sessions.execute {
             // Si el micrófono no se puede abrir mientras habla, simplemente no se puede interrumpir con la voz.
-            run(
+            guarded({}) { run(
                 mine, whileSpeaking = true, isEcho = isEcho, onInterrupt = onInterrupt,
                 onPartial = onPartial, onHeard = onHeard, onNothing = onNothing, onFailed = {},
-            )
+            ) }
         }
     }
 

@@ -150,12 +150,43 @@ class Cards private constructor(context: Context, file: File) :
         Assistant.brainDirty = true
     }
 
-    /** Las fichas que se nombran en [text], la más larga primero (como mucho [max]). */
+    /** Las fichas que se nombran en [text], la más larga primero (como mucho [max]). Si no nombra ninguna, la que encaje por sentido. */
     fun detect(text: String, max: Int = 2): List<Ficha> {
+        val named = detectByName(text, max)
+        if (named.isNotEmpty()) return named
+        return listOfNotNull(bySense(text))
+    }
+
+    /** Solo por nombre o alias (perdonando errores de voz). */
+    fun detectByName(text: String, max: Int = 2): List<Ficha> {
         val words = Spoken.words(text)
         if (words.isEmpty()) return emptyList()
         return all().mapNotNull { f -> f.names.maxOfOrNull { Spoken.find(words, it) }?.takeIf { it > 0 }?.let { f to it } }
             .sortedByDescending { it.second }.take(max).map { it.first }
+    }
+
+    /** El vector de sentido de cada ficha (nombre, alias y resumen), guardado mientras no cambie. */
+    private val senses = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, FloatArray>>()
+
+    private fun senseOf(f: Ficha): FloatArray? {
+        val text = (f.names + f.summary).filter { it.isNotBlank() }.joinToString(". ")
+        senses[f.id]?.takeIf { it.first == text }?.let { return it.second }
+        val v = Sentido.embed(text) ?: return null
+        senses[f.id] = text to v
+        return v
+    }
+
+    /**
+     * La ficha de la que habla [text] sin nombrarla ("la app de la tienda" → Nexo), por sentido.
+     * Solo si encaja bien y claramente mejor que la segunda; si no, null (mejor no adivinar).
+     */
+    fun bySense(text: String, min: Double = SentidoUmbrales.FICHA): Ficha? {
+        if (Spoken.words(text).size < 2) return null
+        val q = Sentido.embed(text)?.takeIf { v -> v.any { it != 0f } } ?: return null
+        val scored = all().mapNotNull { f -> senseOf(f)?.let { f to SentidoModel.cosine(q, it) } }.sortedByDescending { it.second }
+        val best = scored.firstOrNull() ?: return null
+        val second = scored.getOrNull(1)?.second ?: 0.0
+        return best.first.takeIf { best.second >= min && best.second - second >= SentidoUmbrales.FICHA_MARGEN }
     }
 
     /** ¿[text] habla de [f]? */
@@ -374,7 +405,12 @@ object CardCommands {
         }
         ask.find(t)?.let { m ->
             val rest = m.groupValues.drop(1).firstOrNull { it.isNotBlank() } ?: return@let
-            val f = cards.detect(rest, max = 1).firstOrNull() ?: return@let
+            val f = cards.detectByName(rest, max = 1).firstOrNull() ?: run {
+                // "¿Recuerdas la app de la tienda?": sin nombrarla, pero se entiende cuál es.
+                val guess = cards.bySense(rest, SentidoUmbrales.FICHA_DIRECTA) ?: return@let
+                cards.touch(guess.id)
+                return "Creo que hablas de ${guess.name}. " + cards.spoken(guess)
+            }
             // Solo si la pregunta es por la ficha en general; lo concreto lo contesta el modelo con su detalle.
             val extra = Spoken.words(rest).size - Spoken.words(f.name).size
             if (extra > 2) return@let

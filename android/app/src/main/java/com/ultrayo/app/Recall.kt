@@ -117,12 +117,28 @@ class Recall private constructor(private val context: Context, file: File) :
         return true
     }
 
+    /** Vector de sentido de cada recuerdo (por id), guardado mientras su texto no cambie. */
+    private val senses = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, FloatArray>>()
+
+    /** Parecido de [row] con la pregunta: por letras y, si está el modelo, también por sentido (sinónimos). */
+    private fun likeness(row: Row, q: ByteArray, qSense: FloatArray?): Double {
+        val letters = similarity(row.vec, q)
+        if (qSense == null) return letters
+        val text = row.learned.text
+        val v = senses[row.learned.id]?.takeIf { it.first == text }?.second
+            ?: Sentido.embed(text)?.also { senses[row.learned.id] = text to it }
+        return SentidoUmbrales.mezcla(letters, v?.let { SentidoModel.cosine(qSense, it) })
+    }
+
+    private fun senseOf(query: String): FloatArray? = Sentido.embed(query)?.takeIf { v -> v.any { it != 0f } }
+
     /** Los recuerdos que más se parecen a [query]. Cuentan como usados (así no se olvidan). */
     @Synchronized
     fun relevant(query: String, k: Int = 4, min: Double = 0.30, exclude: Set<Long> = emptySet()): List<Learned> {
         val q = vector(query)
+        val qSense = senseOf(query)
         val found = rows().filter { it.learned.id !in exclude }
-            .map { it to similarity(it.vec, q) }.filter { it.second >= min }
+            .map { it to likeness(it, q, qSense) }.filter { it.second >= min }
             .sortedByDescending { it.second }.take(k).map { it.first.learned }
         if (found.isNotEmpty()) {
             writableDatabase.execSQL(
@@ -140,8 +156,9 @@ class Recall private constructor(private val context: Context, file: File) :
     @Synchronized
     fun matching(query: String, k: Int, belongs: (String) -> Boolean): List<Learned> {
         val q = vector(query)
+        val qSense = senseOf(query)
         val found = rows().filter { belongs(it.learned.text) }
-            .sortedByDescending { similarity(it.vec, q) + it.learned.tier * 0.05 }.take(k).map { it.learned }
+            .sortedByDescending { likeness(it, q, qSense) + it.learned.tier * 0.05 }.take(k).map { it.learned }
         if (found.isNotEmpty()) {
             writableDatabase.execSQL(
                 "UPDATE recuerdos SET usado = ?, usos = usos + 1 WHERE id IN (${found.joinToString(",") { it.id.toString() }})",

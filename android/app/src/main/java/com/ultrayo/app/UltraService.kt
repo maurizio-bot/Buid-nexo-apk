@@ -97,7 +97,9 @@ class UltraService : Service() {
             }
             val loaded = try {
                 if (WakeModel.isReady(this)) Model(WakeModel.dir(this).path) else null
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // También si falta la librería nativa de Vosk (UnsatisfiedLinkError).
+                ErrorLog.add("No pude cargar el oído de la palabra \"Ultra\"", e)
                 null
             }
             ContextCompat.getMainExecutor(this).execute {
@@ -313,6 +315,12 @@ class UltraService : Service() {
         private val loader = Executors.newSingleThreadExecutor()
 
         fun start(context: Context) {
+            // Sin micrófono Android 14 cierra la app al poner el aviso fijo de micrófono: mejor no empezar.
+            if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                throw IllegalStateException("falta el permiso del micrófono")
+            }
             ContextCompat.startForegroundService(context, Intent(context, UltraService::class.java))
         }
 

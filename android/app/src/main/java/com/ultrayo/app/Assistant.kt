@@ -16,7 +16,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -78,7 +77,15 @@ object Assistant {
     )
 
     private lateinit var app: Context
-    private val scope = MainScope()
+    // Si algo falla en segundo plano, se apunta y se avisa en vez de cerrar la app.
+    private val scope = Safe.mainScope("asistente") { error ->
+        main.post {
+            thinking = false
+            listening = false
+            loading = false
+            say("Algo ha fallado: ${Safe.describe(error)}. Lo he apuntado en Ajustes > Registro de errores.")
+        }
+    }
     private val main = Handler(Looper.getMainLooper())
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -124,6 +131,8 @@ object Assistant {
         }
         NeuralVoice.onDone = { utteranceDone(it) }
         Bluetooth.init(app)
+        // El sentido de las palabras (sinónimos en fichas y recuerdos): unos 28 MB, en segundo plano.
+        Sentido.preload(app)
         loadFastVoice()
     }
 
@@ -202,7 +211,12 @@ object Assistant {
                 brainDirty = true
                 status = ""
                 onReady()
-            } catch (e: Exception) {
+            } catch (e: OutOfMemoryError) {
+                status = "No hay memoria para cargar el modelo. Cierra otras apps o elige uno más pequeño."
+                ErrorLog.add("Sin memoria al cargar el modelo", e)
+            } catch (e: Throwable) {
+                // También fallos de librerías nativas (UnsatisfiedLinkError), que no son Exception.
+                ErrorLog.add("No pude cargar el modelo", e)
                 status = "No pude cargar el modelo: ${e.message}"
                 // Si falla un cerebro nuevo (por ejemplo uno propio mal convertido), vuelve al ligero.
                 if (downloader.model != BrainModel.LIGHT && ModelDownloader(app, BrainModel.LIGHT).isReady()) {
@@ -602,6 +616,17 @@ object Assistant {
 
     /** Responde a [typed] (más un adjunto opcional). [onDone] se llama cuando termina de contestar. */
     fun send(typed: String, attached: Attachment? = null, onDone: (() -> Unit)? = null) {
+        try {
+            sendNow(typed, attached, onDone)
+        } catch (e: Exception) {
+            // Una orden que falla (un permiso, una app que no está, un dato raro) no cierra la app.
+            ErrorLog.add("Fallo al atender \"${typed.take(80)}\"", e)
+            thinking = false
+            say("No pude hacerlo: ${Safe.describe(e)}. Lo he apuntado en Ajustes > Registro de errores.", onDone)
+        }
+    }
+
+    private fun sendNow(typed: String, attached: Attachment?, onDone: (() -> Unit)?) {
         val text = typed.ifBlank {
             when {
                 attached?.imagePath != null -> "¿Qué ves en esta foto?"
@@ -768,7 +793,12 @@ object Assistant {
     private fun askModel(text: String, prompt0: String, image: String?, history: List<Turn>, onDone: (() -> Unit)?) {
         val brain = Ai.brain
         if (brain == null) {
-            say("Todavía me estoy despertando. Dame un momento.", onDone)
+            val downloaded = runCatching { ModelDownloader(app).isReady() }.getOrDefault(true)
+            say(
+                if (downloaded) "Todavía me estoy despertando. Dame un momento."
+                else "Aún no tengo el cerebro descargado; descárgalo en la pantalla de inicio. Mientras, las órdenes del teléfono sí funcionan.",
+                onDone,
+            )
             return
         }
         if (image != null && !brain.visionEnabled) {
@@ -867,44 +897,50 @@ object Assistant {
             val failed = failure
             // Los últimos trozos llegan por el hilo principal: que se pongan antes de cerrar.
             main.post {
-                thinking = false
-                if (gen != generation) {
-                    onCut?.invoke()
-                    return@post
-                }
-                if (failed != null && turnIndex == -1) {
-                    say(failed, onDone)
-                    return@post
-                }
-                // Si el modelo escribió la herramienta como texto en vez de usarla, se hace por él.
-                val reply = Thinking.strip(rawReply)
-                val written = WrittenCalls.handle(app, reply)
-                val finalText = when {
-                    written != null -> (written.remainingText + "\n\n" + written.done.joinToString(" ")).trim()
-                    failed != null -> "$shown\n\n($failed)".trim()
-                    else -> reply.ifBlank { shown.toString() }
-                }.ifBlank { "No sé qué responder a eso." }
-                shown.setLength(0)
-                shown.append(finalText)
-                showLive()
-                status = ""
-                afterNote?.let { status = it }
-                afterNote = null
-                if (failed == null && finalText.isNotBlank()) TrainingLog.add(app, text, finalText, "local")
-                Learner.afterReply()
-                if (voice) {
-                    if (written != null) {
-                        unspoken.clear()
-                        speakPart(written.done.joinToString(" "))
-                    } else if (!spokeAny && unspoken.isEmpty()) {
-                        speakPart(finalText)
-                    } else {
-                        takeSentences(unspoken, final = true, first = false).forEach { speakPart(it) }
+                try {
+                    thinking = false
+                    if (gen != generation) {
+                        onCut?.invoke()
+                        return@post
                     }
-                    streamOpen = false
-                    maybeFinishSpeech()
-                } else {
-                    onDone?.invoke()
+                    if (failed != null && turnIndex == -1) {
+                        say(failed, onDone)
+                        return@post
+                    }
+                    // Si el modelo escribió la herramienta como texto en vez de usarla, se hace por él.
+                    val reply = Thinking.strip(rawReply)
+                    val written = WrittenCalls.handle(app, reply)
+                    val finalText = when {
+                        written != null -> (written.remainingText + "\n\n" + written.done.joinToString(" ")).trim()
+                        failed != null -> "$shown\n\n($failed)".trim()
+                        else -> reply.ifBlank { shown.toString() }
+                    }.ifBlank { "No sé qué responder a eso." }
+                    shown.setLength(0)
+                    shown.append(finalText)
+                    showLive()
+                    status = ""
+                    afterNote?.let { status = it }
+                    afterNote = null
+                    if (failed == null && finalText.isNotBlank()) TrainingLog.add(app, text, finalText, "local")
+                    Learner.afterReply()
+                    if (voice) {
+                        if (written != null) {
+                            unspoken.clear()
+                            speakPart(written.done.joinToString(" "))
+                        } else if (!spokeAny && unspoken.isEmpty()) {
+                            speakPart(finalText)
+                        } else {
+                            takeSentences(unspoken, final = true, first = false).forEach { speakPart(it) }
+                        }
+                        streamOpen = false
+                        maybeFinishSpeech()
+                    } else {
+                        onDone?.invoke()
+                    }
+                } catch (e: Exception) {
+                    ErrorLog.add("Fallo al terminar la respuesta", e)
+                    thinking = false
+                    say("Algo falló al terminar la respuesta: ${Safe.describe(e)}", onDone)
                 }
             }
         }

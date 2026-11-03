@@ -157,25 +157,37 @@ object NeuralVoice {
         while (true) {
             val item = playQueue.take()
             val audio = synchronized(lock) { track } ?: continue
-            when (item) {
-                is Chunk -> write(item)
-                is End -> {
-                    // Espera a que suene de verdad el final de la frase (con un límite por si el audio se atasca).
-                    val deadline = System.currentTimeMillis() + 2000 + synchronized(lock) { framesWritten } * 1000 / sampleRate
-                    while (System.currentTimeMillis() < deadline) {
-                        val pending = synchronized(lock) {
-                            item.gen == generation && head(audio) - baseHead < framesWritten
-                        }
-                        if (!pending) break
-                        Thread.sleep(10)
+            // Un fallo del altavoz (AudioTrack) no debe matar este hilo ni cerrar la app.
+            try {
+                play(item, audio)
+            } catch (e: InterruptedException) {
+                return
+            } catch (e: Exception) {
+                ErrorLog.add("Fallo al reproducir la voz", e)
+                if (item is End) main.post { onDone?.invoke(item.id) }
+            }
+        }
+    }
+
+    private fun play(item: Item, audio: AudioTrack) {
+        when (item) {
+            is Chunk -> write(item)
+            is End -> {
+                // Espera a que suene de verdad el final de la frase (con un límite por si el audio se atasca).
+                val deadline = System.currentTimeMillis() + 2000 + synchronized(lock) { framesWritten } * 1000 / sampleRate
+                while (System.currentTimeMillis() < deadline) {
+                    val pending = synchronized(lock) {
+                        item.gen == generation && head(audio) - baseHead < framesWritten
                     }
-                    synchronized(lock) {
-                        if (item.gen == generation && playQueue.isEmpty()) {
-                            runCatching { audio.pause() }
-                        }
-                    }
-                    main.post { onDone?.invoke(item.id) }
+                    if (!pending) break
+                    Thread.sleep(10)
                 }
+                synchronized(lock) {
+                    if (item.gen == generation && playQueue.isEmpty()) {
+                        runCatching { audio.pause() }
+                    }
+                }
+                main.post { onDone?.invoke(item.id) }
             }
         }
     }

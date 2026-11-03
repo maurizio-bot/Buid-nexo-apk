@@ -12,8 +12,22 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.19.0"
+        versionCode = 29
+        versionName = "0.21.0"
+        // Pruebas automáticas en un emulador (GitHub Actions): ver android/scripts/prueba-emulador.sh
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    testOptions {
+        // Las pruebas rápidas (sin teléfono) usan clases de Android vacías: que devuelvan 0/null en vez de fallar.
+        unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            it.maxHeapSize = "1g"
+            it.testLogging {
+                showStandardStreams = true
+                events("failed", "skipped")
+            }
+        }
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior
@@ -80,4 +94,12 @@ dependencies {
     // Descomprimir zip, 7z, tar, gz, bz2 y xz
     implementation("org.apache.commons:commons-compress:1.26.2")
     implementation("org.tukaani:xz:1.9")
+
+    // Pruebas rápidas en el ordenador (lógica pura: cuentas, nombres oídos, "Ultra"…)
+    testImplementation("junit:junit:4.13.2")
+    // Pruebas en el emulador: abre la app, recorre los ajustes y lanza órdenes directas
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }

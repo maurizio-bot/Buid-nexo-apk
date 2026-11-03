@@ -131,6 +131,43 @@ class MainActivity : ComponentActivity() {
     private var wakeOn by mutableStateOf(false)
 
     private var controlOn by mutableStateOf(false)
+
+    // Asistente de permisos: sale la primera vez y se puede abrir desde Ajustes.
+    private var showPermisos by mutableStateOf(false)
+    private var permTick by mutableStateOf(0)
+
+    private val askPermisos = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        permTick++
+        phoneAccess = hasPhonePermissions()
+        mediaAccess = DeviceFiles.hasMedia(this)
+        refreshAccess()
+    }
+
+    /** Pide los permisos de un paso; si Android ya no enseña la ventana (se denegó dos veces), abre los ajustes de la app. */
+    private fun pedirPaso(paso: Permisos.Paso.Dialogo) {
+        val faltan = paso.permisos.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (faltan.isEmpty()) return
+        val bloqueado = Permisos.pedido(this, paso) && faltan.none { shouldShowRequestPermissionRationale(it) }
+        if (bloqueado) {
+            status = "Android ya no enseña la ventana: actívalo en Permisos y vuelve."
+            openSettings(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            return
+        }
+        Permisos.marcarPedido(this, paso)
+        runCatching { askPermisos.launch(faltan.toTypedArray()) }
+    }
+
+    private fun pedirTodos() {
+        val faltan = Permisos.dialogosQueFaltan(this)
+        if (faltan.isEmpty()) return
+        Permisos.pasos().filterIsInstance<Permisos.Paso.Dialogo>().forEach { Permisos.marcarPedido(this, it) }
+        runCatching { askPermisos.launch(faltan) }
+    }
+
+    private fun cerrarPermisos() {
+        Permisos.marcarVisto(this)
+        showPermisos = false
+    }
     private var phoneAccess by mutableStateOf(false)
 
     private val phonePermissions = arrayOf(
@@ -221,6 +258,7 @@ class MainActivity : ComponentActivity() {
             ?: nativeExit?.let { "$it\nEl registro completo está en Ajustes > Registro de errores." }
         folders = Folders.list(this)
         mediaAccess = DeviceFiles.hasMedia(this)
+        showPermisos = !Permisos.visto(this)
         downloader = ModelDownloader(this)
         setContent {
             MaterialTheme(
@@ -255,6 +293,7 @@ class MainActivity : ComponentActivity() {
         controlOn = UltraAccessibility.instance != null
         phoneAccess = hasPhonePermissions()
         refreshAccess()
+        permTick++
         if (brainReady) maybeStartWake()
         // Con el teléfono bloqueado (abierta con el botón lateral) empieza a escuchar sola.
         val talk = talkRequested
@@ -386,7 +425,7 @@ class MainActivity : ComponentActivity() {
                     file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
                     file.path
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 status = "No pude abrir la foto: ${e.message}"
                 return@launch
             }
@@ -415,7 +454,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val text = try {
                 withContext(Dispatchers.IO) { DocReader.read(this@MainActivity, uri, name, type) }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 status = "No pude leer \"$name\": ${e.message}"
                 return@launch
             }
@@ -430,7 +469,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val summary = try {
                 withContext(Dispatchers.IO) { Archives.extract(this@MainActivity, uri, name).second }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 status = "No pude descomprimir \"$name\": ${e.message}"
                 return@launch
             }
@@ -497,9 +536,21 @@ class MainActivity : ComponentActivity() {
                 )
                 return@Column
             }
-            Header(showMemory = showMemory, onToggleMemory = { showMemory = !showMemory })
+            Header(
+                showMemory = showMemory || (showPermisos && !locked),
+                onToggleMemory = { if (showPermisos) cerrarPermisos() else showMemory = !showMemory },
+            )
             when {
                 lastCrash != null -> CrashScreen(lastCrash.orEmpty(), Modifier.weight(1f))
+                showPermisos && !locked -> PermisosScreen(
+                    context = this@MainActivity,
+                    tick = permTick,
+                    pedir = { pedirPaso(it) },
+                    pedirTodos = { pedirTodos() },
+                    abrir = { openSettings(it) },
+                    onListo = { cerrarPermisos() },
+                    modifier = Modifier.weight(1f),
+                )
                 showMemory && !locked -> MemoryScreen(Modifier.weight(1f))
                 !brainReady -> SetupScreen(Modifier.weight(1f))
                 else -> ChatScreen(Modifier.weight(1f))
@@ -823,6 +874,16 @@ class MainActivity : ComponentActivity() {
         var voiceReplies by remember { mutableStateOf(memory.voiceReplies) }
 
         LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item {
+                Card {
+                    val faltan = remember(permTick) { Permisos.faltan(this@MainActivity) }
+                    SectionTitle(
+                        "Permisos de Ultra",
+                        if (faltan == 0) "✓ Tiene todos los permisos." else "Le faltan $faltan. Dáselos de una vez y Android no te interrumpirá.",
+                    )
+                    GlowButton("Revisar permisos", onClick = { showPermisos = true }, Modifier.fillMaxWidth())
+                }
+            }
             item { ControlCard() }
             item { BrainCard() }
             item { CardsCard() }

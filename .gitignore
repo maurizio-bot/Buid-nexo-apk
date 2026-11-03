@@ -6,3 +6,4 @@ android/app/src/main/jniLibs/
 android/app/src/main/assets/qnn/
 # Detector de voz: lo descarga android/scripts/motor-voz.sh
 android/app/src/main/assets/silero_vad.onnx
+android/app/src/main/assets/sentido/
