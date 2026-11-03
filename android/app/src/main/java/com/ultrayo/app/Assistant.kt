@@ -131,6 +131,7 @@ object Assistant {
         }
         NeuralVoice.onDone = { utteranceDone(it) }
         Bluetooth.init(app)
+        Safe.run("programar las rutinas") { Rutinas.programar(app) }
         // El sentido de las palabras (sinónimos en fichas y recuerdos): unos 28 MB, en segundo plano.
         Sentido.preload(app)
         loadFastVoice()
@@ -199,7 +200,7 @@ object Assistant {
                         Ai.brain = Brain(
                             downloader.file.path,
                             app.cacheDir.path,
-                            listOf(PhoneTools(app), ControlTools(app), KnowledgeTools(app), CardTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
+                            listOf(PhoneTools(app), ControlTools(app), KnowledgeTools(app), CardTools(app), DataTools(app), SkillTools(app), SelfTools(app), GitHubTools(app)),
                         ).also {
                             it.load(useGpu = gpu)
                             GpuGuard.afterLoad(app, tried = gpu, onGpu = it.onGpu)
@@ -226,6 +227,27 @@ object Assistant {
                 }
             } finally {
                 loading = false
+            }
+        }
+    }
+
+    /** Si [text] es "busca en internet X", devuelve X (para buscarlo por adelantado mientras habla). */
+    fun webQueryOf(text: String): String? =
+        webRequest.find(text.trim())?.groupValues?.drop(1)?.firstOrNull { it.isNotBlank() }?.trim()?.takeIf { it.length > 1 }
+
+    /**
+     * Deja el modelo preparado (instrucciones y conversación) mientras Maurizio aún habla, para que
+     * empiece a contestar antes. No cambia nada si ya estaba listo.
+     */
+    fun prewarm() {
+        val brain = Ai.brain ?: return
+        if (!brainDirty || thinking || loading || !::memory.isInitialized) return
+        brainDirty = false
+        val systemPrompt = memory.systemPrompt()
+        val history = turns.takeLast(MAX_HISTORY).toList()
+        scope.launch {
+            withContext(Ai.thread) {
+                runCatching { brain.reset(systemPrompt, history) }.onFailure { brainDirty = true }
             }
         }
     }
@@ -258,14 +280,20 @@ object Assistant {
         cutSpeech()
         listening = true
         status = "Te escucho…"
+        Anticipa.onListenStart(app)
         NeuralEar.listen(
-            onPartial = { status = "🎙 $it" },
+            onPartial = {
+                status = "🎙 $it"
+                Anticipa.onPartial(app, it)
+            },
             onHeard = { text ->
+                Anticipa.onEnd()
                 listening = false
                 status = ""
                 onHeard(text)
             },
             onNothing = {
+                Anticipa.onEnd()
                 listening = false
                 status = ""
                 onNothing()
@@ -413,9 +441,11 @@ object Assistant {
      */
     private fun reply(text: String, ear: Ear, onEnd: () -> Unit) {
         bargeIn = if (neuralEarOn() && memory.bargeIn) { heard -> reply(heard, ear, onEnd) } else null
+        val bye = Referencias.esDespedida(text)
         send(text) {
             bargeIn = null
-            if (memory.voiceReplies) converse(ear, onEnd) else onEnd()
+            // Sigue escuchando unos segundos sin tener que decir "Ultra" otra vez (salvo que se despida).
+            if (memory.voiceReplies && memory.followUp && !bye) converse(ear, onEnd) else onEnd()
         }
     }
 
@@ -507,6 +537,28 @@ object Assistant {
         afterSpeech = onDone
         speakPart(text)
         maybeFinishSpeech()
+    }
+
+    /** La pantalla de Ultra está delante (entonces puede usar el micrófono sin el servicio). */
+    @Volatile
+    var visible = false
+
+    /**
+     * Dice una pregunta (por ejemplo "¿Lo envío?") y, si contesta por voz, se queda escuchando la respuesta
+     * sin que Maurizio tenga que decir "Ultra" otra vez. Desde cualquier hilo.
+     */
+    fun sayAndListen(text: String) = main.post {
+        say(text, onDone = { listenForAnswer() })
+    }.let {}
+
+    /** Abre el micrófono para la respuesta: con el servicio de "Ultra" si está, o desde la pantalla si se ve. */
+    fun listenForAnswer() {
+        if (!memory.voiceReplies || listening || thinking || speaking) return
+        val service = UltraService.instance
+        when {
+            service != null -> service.wake(beep = false)
+            visible -> startConversation()
+        }
     }
 
     /** Dice algo que llega más tarde (por ejemplo "Enviado"), desde cualquier hilo. */
@@ -664,6 +716,83 @@ object Assistant {
                 say("Hecho, vuelvo a contestarte en voz alta.", onDone)
                 return
             }
+            // "Gracias", "nada más": se despide (y la conversación por voz no vuelve a escuchar).
+            if (Referencias.esDespedida(command)) {
+                say(listOf("De nada.", "Aquí estoy.", "Cuando quieras.").random(), onDone)
+                return
+            }
+            // Rutinas que él encarga: "cada mañana a las 8 dame un resumen", "avísame si me escribe Juan".
+            Rutinas.atender(app, command) { summary -> notify(summary) }?.let { answer ->
+                say(answer, onDone)
+                return
+            }
+            // Sus proyectos en GitHub: repos, cambios, issues, compilación, README, archivos y buscar en el código.
+            GitHub.entender(command)?.let { pedido ->
+                thinking = true
+                status = "Mirando GitHub…"
+                scope.launch {
+                    val result = runCatching { withContext(Dispatchers.IO) { GitHub.hacer(app, pedido, text) } }
+                    thinking = false
+                    result.fold(
+                        onSuccess = { r ->
+                            when (r) {
+                                is GitHub.Resultado.Texto -> say(r.texto, onDone)
+                                is GitHub.Resultado.ParaModelo ->
+                                    if (Ai.brain == null) say(r.prompt.substringBefore("\n\nPetición").take(1500), onDone)
+                                    else askModel(text, r.prompt, null, history, onDone)
+                                is GitHub.Resultado.Confirmar -> say(Control.ask(r.plan, r.hacer), onDone)
+                            }
+                        },
+                        onFailure = { say("No pude consultar GitHub: ${Safe.describe(it)}.", onDone) },
+                    )
+                }
+                return
+            }
+            Burbuja.order(command)?.let { on ->
+                say(Burbuja.switch(app, on), onDone)
+                return
+            }
+            // "¿Qué es esto?", "resume lo que estoy leyendo", "mira con la cámara": que vea.
+            Vista.pedido(command)?.let { pedido ->
+                lookAt(pedido, text, history, onDone)
+                return
+            }
+            // "Mándaselo a Juan", "llámale", "ábrelo", "repítelo": lo de antes, sin repetir nombres.
+            val previous = history.lastOrNull { it.role == "assistant" }?.content
+            when (val ref = Referencias.resolver(command, previous)) {
+                is Referencias.Resuelto.Orden -> {
+                    val answer = QuickActions.handle(app, ref.texto)
+                        ?: runCatching { CardCommands.handle(ref.texto, app) }.getOrNull()
+                    if (answer != null) {
+                        say(answer, onDone)
+                        return
+                    }
+                }
+                Referencias.Resuelto.Repetir -> {
+                    say(previous.orEmpty(), onDone)
+                    return
+                }
+                Referencias.Resuelto.Copiar -> {
+                    val clip = app.getSystemService(android.content.ClipboardManager::class.java)
+                    clip?.setPrimaryClip(android.content.ClipData.newPlainText("Ultra Yo", previous.orEmpty()))
+                    say("Copiado.", onDone)
+                    return
+                }
+                is Referencias.Resuelto.AbrirEnlace -> {
+                    if (locked()) return say("Desbloquea el teléfono y te lo abro.", onDone)
+                    val opened = runCatching {
+                        app.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(ref.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }.isSuccess
+                    say(if (opened) "Abriendo el enlace." else "No pude abrir el enlace.", onDone)
+                    return
+                }
+                null -> {}
+            }
+            // Tareas de varios pasos ("busca X y mándaselo a Juan"): plan, su sí, y paso a paso.
+            Tareas.plan(command)?.let { pasos ->
+                say(Tareas.proponer(app, pasos), onDone)
+                return
+            }
             // Órdenes del teléfono: al instante, sin pasar por el modelo.
             QuickActions.handle(app, text)?.let { answer ->
                 say(answer, onDone)
@@ -688,7 +817,7 @@ object Assistant {
                 val query = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }.orEmpty().trim()
                 if (query.length > 1) {
                     retrieveThenAsk(text, history, onDone, "Buscando y leyendo en internet…") {
-                        val pages = WebSearch.readTop(query, pages = 3)
+                        val pages = Anticipa.result(command) ?: WebSearch.readTop(query, pages = 3)
                         if (pages.isBlank()) null
                         else "Lo que dicen las mejores páginas sobre \"$query\":\n$pages\n\n" +
                             "Pregunta de Maurizio: $text\n\nContesta resumiendo lo que dicen estas páginas, sin inventar nada que no esté en " +
@@ -711,7 +840,7 @@ object Assistant {
                 thinking = true
                 status = "Mirándolo…"
                 scope.launch {
-                    val answer = runCatching { withContext(Dispatchers.IO) { work() } }
+                    val answer = runCatching { withContext(Dispatchers.IO) { Anticipa.result(command) ?: work() } }
                         .getOrElse { "No pude consultarlo (¿hay conexión a internet?): ${it.message}" }
                     thinking = false
                     say(answer, onDone)
@@ -946,6 +1075,52 @@ object Assistant {
         }
     }
 
+
+    /** Mira la pantalla (texto y captura) o abre la cámara, y se lo pasa al modelo con la pregunta. */
+    private fun lookAt(pedido: Vista.Pedido, text: String, history: List<Turn>, onDone: (() -> Unit)?) {
+        val robot = UltraAccessibility.instance
+        val kind = if (pedido == Vista.Pedido.ESTO) {
+            if (robot != null && !robot.ultraInFront()) Vista.Pedido.PANTALLA else Vista.Pedido.CAMARA
+        } else {
+            pedido
+        }
+        if (kind == Vista.Pedido.CAMARA) {
+            if (locked()) return say("Desbloquea el teléfono y te abro la cámara.", onDone)
+            Vista.abrirCamara(app, text)
+            return say("Te abro la cámara: enfoca y haz la foto.", onDone)
+        }
+        if (robot == null) {
+            return say("Para ver tu pantalla necesito el control del teléfono: actívalo en Ajustes, en Control del teléfono.", onDone)
+        }
+        if (robot.ultraInFront()) {
+            return say("Ahora mismo en la pantalla estoy yo. Ve a la otra app y pídemelo diciendo «Ultra» o desde la burbuja.", onDone)
+        }
+        val screenText = robot.readScreen(maxChars = if (kind == Vista.Pedido.LEER) 3500 else 1200)
+        if (kind == Vista.Pedido.LEER) {
+            askModel(
+                text,
+                "Esto es lo que se lee ahora en la pantalla de Maurizio:\n$screenText\n\nPetición de Maurizio: $text\n\n" +
+                    "Contesta solo con lo que hay en la pantalla, sin inventar.",
+                null, history, onDone,
+            )
+            return
+        }
+        thinking = true
+        status = "Mirando tu pantalla…"
+        robot.screenshot { path ->
+            main.post {
+                thinking = false
+                val image = path?.takeIf { Ai.brain?.visionEnabled == true }
+                askModel(
+                    text,
+                    "Maurizio está mirando su pantalla y pregunta: $text\n\nTexto que se lee en la pantalla:\n$screenText\n\n" +
+                        (if (image != null) "Te paso también una captura de la pantalla. " else "") +
+                        "Contesta breve y concreto.",
+                    image, history, onDone,
+                )
+            }
+        }
+    }
 
     /**
      * Primero consigue datos ([fetch]: internet o sus documentos, fuera del hilo principal) y luego

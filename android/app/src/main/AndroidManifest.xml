@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Para volver a programar las rutinas que activas (el resumen de la mañana) al encender el teléfono -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Ver (solo leer) fotos, vídeos y audio para buscarlos -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -129,6 +131,23 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- Rutinas que activas: el resumen de la mañana y volver a programarlo al encender el teléfono -->
+        <receiver
+            android:name=".RutinasReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- "¿Qué es esto?" con la cámara: abre la app de cámara y le pasa la foto a Ultra -->
+        <activity
+            android:name=".CameraActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <service
             android:name=".UltraService"

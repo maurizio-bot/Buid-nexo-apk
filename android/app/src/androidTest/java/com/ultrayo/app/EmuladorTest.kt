@@ -183,6 +183,15 @@ class EmuladorTest {
         assertTrue(ask("Mándale un whatsapp a Pepe que llego tarde").startsWith("No encuentro a Pepe"))
         assertTrue(ask("mándale un SMS a Pepe que llego tarde").startsWith("No encuentro a Pepe"))
         assertTrue(ask("envíale un mensaje a Pepe: llego tarde").startsWith("No encuentro a Pepe"))
+        // Una tarea de varios pasos: enseña el plan y no hace nada sin el sí.
+        assertTrue(ask("busca el tiempo en Madrid y mándaselo a Pepe por WhatsApp").startsWith("Plan de 2 pasos"))
+        assertEquals("Vale, no lo hago.", ask("no"))
+        // Rutinas: se ponen, se listan y se quitan sin cerrar nada.
+        assertTrue(ask("avísame si me escribe Pepe").startsWith("Vale, te aviso"))
+        assertTrue(ask("cada mañana a las 8 dame un resumen").startsWith("Hecho"))
+        assertTrue(ask("mis rutinas").startsWith("Tus rutinas"))
+        ask("quita el resumen de la mañana")
+        ask("deja de avisarme de Pepe")
         // Una acción con confirmación: se cancela.
         ask("crea una habilidad llamada saludo: di hola con energía")
         ask("no")

@@ -285,8 +285,14 @@ class MainActivity : ComponentActivity() {
         if (intent.action == ACTION_TALK) talkRequested = true
     }
 
+    override fun onPause() {
+        Assistant.visible = false
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
+        Assistant.visible = true
         locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
         wakeOn = UltraService.instance != null
         mediaAccess = DeviceFiles.hasMedia(this)
@@ -885,10 +891,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
             item { ControlCard() }
+            item { RutinasCard() }
             item { BrainCard() }
             item { CardsCard() }
             item { LearnedCard() }
             item { ExpertCard() }
+            item { GitHubCard() }
             item {
                 Card {
                     SectionTitle("Voz")
@@ -900,6 +908,15 @@ class MainActivity : ComponentActivity() {
                     WakeBatteryHint()
                     FastVoiceSettings()
                     BluetoothSettings()
+                    var followUp by remember { mutableStateOf(memory.followUp) }
+                    SettingSwitch(
+                        "Seguir escuchando tras responder",
+                        "Conversación continua: después de contestar te escucha unos segundos sin que digas \"Ultra\". Di \"gracias\" o \"nada más\" para terminar.",
+                        followUp,
+                    ) {
+                        memory.followUp = it
+                        followUp = it
+                    }
                     SettingSwitch(
                         "Contestar en voz alta",
                         "Si lo apagas, contesta por escrito. También puedes decirle \"modo texto\" o \"modo voz\".",
@@ -1672,6 +1689,47 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Sus proyectos en GitHub: usuario y clave opcional (para lo privado, buscar en el código y crear issues). */
+    @Composable
+    private fun GitHubCard() {
+        var user by remember { mutableStateOf(GitHub.user(this@MainActivity)) }
+        var token by remember { mutableStateOf(GitHub.token(this@MainActivity)) }
+        Card {
+            SectionTitle(
+                "GitHub (tus proyectos de código)",
+                "Dile \"mis repos\", \"últimos cambios de nexo\", \"issues de nexo\", \"cómo va la compilación de nexo\", \"lee el README de nexo\" " +
+                    "o \"busca login en el código de nexo\". Sin clave solo ve lo público. Crear una issue siempre te lo pregunta antes.",
+            )
+            OutlinedTextField(
+                value = user,
+                onValueChange = {
+                    user = it
+                    GitHub.setUser(this@MainActivity, it)
+                },
+                label = { Text("Usuario de GitHub") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Clave opcional: github.com > Settings > Developer settings > Personal access tokens > Fine-grained, con permiso de lectura " +
+                    "(y de issues si quieres que las cree). Se guarda solo en el teléfono.",
+                color = UltraColors.Muted,
+                fontSize = 13.sp,
+            )
+            OutlinedTextField(
+                value = token,
+                onValueChange = {
+                    token = it
+                    GitHub.setToken(this@MainActivity, it)
+                },
+                label = { Text("Clave de GitHub (opcional)") },
+                singleLine = true,
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+
     @Composable
     private fun SettingSwitch(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1711,6 +1769,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Las rutinas que Maurizio ha activado (resumen de la mañana, avisos), con botón para quitarlas. */
+    @Composable
+    private fun RutinasCard() {
+        var rutinas by remember { mutableStateOf(Rutinas.lista(this@MainActivity)) }
+        Card {
+            SectionTitle(
+                "Rutinas",
+                "Solo las que tú le pidas: \"cada mañana a las 8 dame un resumen\" (agenda, tiempo y mensajes) o \"avísame si me escribe Juan\". " +
+                    "Añade \"en voz alta\" para que te lo diga si está escuchando.",
+            )
+            if (rutinas.isEmpty()) {
+                Text("No tienes ninguna.", color = UltraColors.Muted, fontSize = 13.sp)
+            }
+            rutinas.forEach { r ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(r.describir(), color = UltraColors.Text, modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        Rutinas.quitar(this@MainActivity, r.id)
+                        rutinas = Rutinas.lista(this@MainActivity)
+                    }) { Text("Quitar") }
+                }
+            }
+        }
+    }
+
     /** Activar el control del teléfono, sus permisos y el registro de lo que ha hecho. */
     @Composable
     private fun ControlCard() {
@@ -1735,6 +1818,16 @@ class MainActivity : ComponentActivity() {
                     fontSize = 12.sp,
                 )
                 GlowButton("Activar control del teléfono", onClick = { UltraAccessibility.openSettings(this@MainActivity) }, Modifier.fillMaxWidth())
+            }
+            var bubbleOn by remember { mutableStateOf(Burbuja.enabled(this@MainActivity)) }
+            SettingSwitch(
+                "Burbuja flotante",
+                "Un botón encima de cualquier app para hablarle sin salir de lo que haces. Tócala para hablar, mantenla para abrir Ultra, arrástrala abajo al centro para quitarla." +
+                    if (controlOn) "" else " Necesita el control del teléfono.",
+                bubbleOn,
+            ) {
+                Burbuja.switch(this@MainActivity, it)
+                bubbleOn = it
             }
             if (!phoneAccess) {
                 GlowButton("Permitir contactos, llamadas y SMS", onClick = { askPhone.launch(phonePermissions) }, Modifier.fillMaxWidth())

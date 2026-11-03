@@ -42,6 +42,11 @@ class Memory(context: Context) {
         get() = prefs.getBoolean("barge_in", true)
         set(value) = prefs.edit().putBoolean("barge_in", value).apply()
 
+    /** Después de contestar, seguir escuchando unos segundos para no tener que decir "Ultra" otra vez. */
+    var followUp: Boolean
+        get() = prefs.getBoolean("follow_up", true)
+        set(value) = prefs.edit().putBoolean("follow_up", value).apply()
+
     /** Usar el micrófono y los altavoces del manos libres o del coche por Bluetooth al conversar. */
     var bluetooth: Boolean
         get() = prefs.getBoolean("bluetooth", true)

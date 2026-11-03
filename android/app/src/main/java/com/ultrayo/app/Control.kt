@@ -88,6 +88,15 @@ object Control {
         }
     }
 
+    /**
+     * Encadena [next] detrás de la acción pendiente: se hace solo si Maurizio dice que sí
+     * (por ejemplo, los pasos que quedan de un plan después de enviar). Desde el hilo principal.
+     */
+    fun thenAfter(next: () -> Unit) {
+        val action = pending ?: return
+        pending = PendingAction(action.plan) { action.run().also { main.post(next) } }
+    }
+
     fun confirm(): String {
         val action = pending ?: return "No había nada pendiente."
         pending = null

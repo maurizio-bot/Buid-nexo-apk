@@ -22,6 +22,15 @@ class ControlTools(context: Context) : ToolSet {
             ?: "No sé hacer esa acción directamente. Si es dentro de una app, usa leerPantalla y pulsar."
     }
 
+    @Tool(description = "Cuando Maurizio pide una tarea de varios pasos entre apps (buscar algo y mandárselo a alguien, abrir una app y hacer algo dentro…), NO la hagas directamente: propón aquí el plan, un paso por línea, en español y en imperativo (\"busca el vuelo más barato a Madrid\", \"mándaselo a Juan por WhatsApp\"). Se le enseña y se hace cuando diga que sí.")
+    fun proponerPlan(
+        @ToolParam(description = "Los pasos, uno por línea o separados por |") pasos: String,
+    ): String {
+        if (Control.stopped) return STOPPED
+        val plan = Tareas.desdeModelo(pasos) ?: return "No entendí los pasos. Escríbelos uno por línea."
+        return Tareas.proponer(context, plan) + " (Ya se lo he enseñado: dile el plan en una frase y espera su sí.)"
+    }
+
     @Tool(description = "Lee el texto y los botones que hay ahora en la pantalla del teléfono, en cualquier app.")
     fun leerPantalla(): String = robot()?.readScreen() ?: NO_CONTROL
 

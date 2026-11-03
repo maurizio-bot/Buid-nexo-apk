@@ -147,3 +147,178 @@ class OrdenesTest {
         assertNull(ImageCommands.parse("qué hora es", hasImage = false))
     }
 }
+
+class TareasTest {
+
+    @Test fun vueloYWhatsApp() {
+        val pasos = Tareas.plan("Ultra, busca el vuelo más barato a Madrid y mándaselo a Juan por WhatsApp")!!
+        assertEquals(2, pasos.size)
+        assertEquals("el vuelo más barato a Madrid", (pasos[0] as Paso.Buscar).consulta)
+        val enviar = pasos[1] as Paso.Enviar
+        assertEquals("Juan", enviar.quien)
+        assertFalse(enviar.sms)
+    }
+
+    @Test fun variosPasosConLuego() {
+        val pasos = Tareas.plan("abre WhatsApp, luego pulsa Chats y después lee la pantalla")!!
+        assertEquals(3, pasos.size)
+        assertTrue(pasos.all { it is Paso.Orden })
+    }
+
+    @Test fun enviarPorSms() {
+        val pasos = Tareas.plan("mira el tiempo en Sevilla mañana y envíaselo a mamá por SMS")!!
+        assertTrue(pasos[0] is Paso.Buscar)
+        assertTrue((pasos[1] as Paso.Enviar).sms)
+        assertEquals("mamá", (pasos[1] as Paso.Enviar).quien)
+    }
+
+    @Test fun unaSolaOrdenNoEsPlan() {
+        assertNull(Tareas.plan("mándale un whatsapp a Juan que llego tarde y que me espere"))
+        assertNull(Tareas.plan("busca recetas de paella en google"))
+        assertNull(Tareas.plan("pon una alarma a las 7 y media"))
+        assertNull(Tareas.plan("qué hora es"))
+        assertNull(Tareas.plan("busca vuelos de ida y vuelta a Roma"))
+    }
+
+    @Test fun mensajeConTextoEsOrden() {
+        val pasos = Tareas.plan("abre WhatsApp y mándale un whatsapp a Juan que llego tarde")!!
+        assertTrue(pasos[1] is Paso.Orden)
+    }
+
+    @Test fun planDelModelo() {
+        val pasos = Tareas.desdeModelo("1. busca hoteles en Roma baratos\n2. mándaselo a Pedro")!!
+        assertEquals(2, pasos.size)
+        assertTrue(pasos[0] is Paso.Buscar)
+        assertTrue(pasos[1] is Paso.Enviar)
+        assertTrue(Tareas.textoDelPlan(pasos).startsWith("Plan de 2 pasos"))
+    }
+}
+
+class ReferenciasTest {
+
+    @Test fun mandaselo() {
+        val r = Referencias.resolver("mándaselo a Juan por WhatsApp", "El vuelo más barato es de Iberia, 49 euros.")
+        assertEquals(
+            "mándale un whatsapp a Juan que El vuelo más barato es de Iberia, 49 euros.",
+            (r as Referencias.Resuelto.Orden).texto,
+        )
+        val sms = Referencias.resolver("envíaselo a mamá por SMS", "Mañana llueve.") as Referencias.Resuelto.Orden
+        assertTrue(sms.texto.startsWith("mándale un sms a mamá que"))
+    }
+
+    @Test fun alDeAntes() {
+        Referencias.ultimoContacto = "Pepe Pérez"
+        assertEquals("llama a Pepe Pérez", (Referencias.resolver("llámale", null) as Referencias.Resuelto.Orden).texto)
+        assertEquals(
+            "mándale un whatsapp a Pepe Pérez que llego tarde",
+            (Referencias.resolver("mándale un whatsapp que llego tarde", null) as Referencias.Resuelto.Orden).texto,
+        )
+        assertEquals(
+            "mándale un whatsapp a Pepe Pérez que Son las 5.",
+            (Referencias.resolver("mándaselo", "Son las 5.") as Referencias.Resuelto.Orden).texto,
+        )
+        Referencias.ultimoContacto = null
+        assertNull(Referencias.resolver("llámale", null))
+    }
+
+    @Test fun repetirCopiarYEnlace() {
+        assertTrue(Referencias.resolver("repítelo", "Hola") is Referencias.Resuelto.Repetir)
+        assertTrue(Referencias.resolver("cópialo", "Hola") is Referencias.Resuelto.Copiar)
+        val link = Referencias.resolver("ábrelo", "Mira aquí: https://ejemplo.com/vuelos.") as Referencias.Resuelto.AbrirEnlace
+        assertEquals("https://ejemplo.com/vuelos", link.url)
+    }
+
+    @Test fun noSeRefiereANada() {
+        assertNull(Referencias.resolver("mándale un whatsapp a Juan que llego tarde", "Hola"))
+        assertNull(Referencias.resolver("manda a Juan", "Hola"))
+        assertNull(Referencias.resolver("qué hora es", "Hola"))
+    }
+
+    @Test fun despedidas() {
+        assertTrue(Referencias.esDespedida("Gracias"))
+        assertTrue(Referencias.esDespedida("vale, gracias"))
+        assertTrue(Referencias.esDespedida("nada más"))
+        assertFalse(Referencias.esDespedida("gracias, ahora pon música"))
+    }
+}
+
+class VistaTest {
+
+    @Test fun queVea() {
+        assertEquals(Vista.Pedido.ESTO, Vista.pedido("Ultra, ¿qué es esto?"))
+        assertEquals(Vista.Pedido.LEER, Vista.pedido("resume lo que estoy leyendo"))
+        assertEquals(Vista.Pedido.LEER, Vista.pedido("tradúceme esto"))
+        assertEquals(Vista.Pedido.PANTALLA, Vista.pedido("qué ves en mi pantalla"))
+        assertEquals(Vista.Pedido.CAMARA, Vista.pedido("qué ves con la cámara"))
+        assertEquals(Vista.Pedido.CAMARA, Vista.pedido("qué es esto que enfoco"))
+    }
+
+    @Test fun noEsMirar() {
+        assertNull(Vista.pedido("abre la cámara"))
+        assertNull(Vista.pedido("lee la pantalla"))
+        assertNull(Vista.pedido("qué es un agujero negro"))
+        assertNull(Vista.pedido("resume la reunión de ayer"))
+    }
+}
+
+class BurbujaTest {
+    @Test fun ordenes() {
+        assertEquals(true, Burbuja.order("pon la burbuja"))
+        assertEquals(true, Burbuja.order("Ultra, activa la burbuja flotante"))
+        assertEquals(false, Burbuja.order("quita la burbuja"))
+        assertNull(Burbuja.order("pon música"))
+    }
+}
+
+class AnticipaTest {
+    @Test fun ordenesCortasCompletas() {
+        assertTrue(Anticipa.esOrdenCompleta("Qué hora es"))
+        assertTrue(Anticipa.esOrdenCompleta("sí"))
+        assertTrue(Anticipa.esOrdenCompleta("Ultra, para"))
+        assertFalse(Anticipa.esOrdenCompleta("qué hora es en Tokio"))
+        assertFalse(Anticipa.esOrdenCompleta("abre WhatsApp"))
+        assertFalse(Anticipa.esOrdenCompleta("sí pero cambia el texto"))
+    }
+}
+
+class RutinasTest {
+    @Test fun resumenDeLaManana() {
+        assertEquals(Rutinas.Pedido.Resumen(8, 0, false), Rutinas.entender("cada mañana a las 8 dame un resumen"))
+        assertEquals(Rutinas.Pedido.Resumen(8, 30, false), Rutinas.entender("cada mañana a las ocho y media dame un resumen"))
+        assertEquals(Rutinas.Pedido.Resumen(7, 30, false), Rutinas.entender("ponme el resumen de la mañana a las 7:30"))
+        assertEquals(Rutinas.Pedido.Resumen(9, 0, true), Rutinas.entender("dame un resumen cada mañana a las 9 en voz alta"))
+        assertEquals(Rutinas.Pedido.Resumen(8, 0, false), Rutinas.entender("resumen matinal"))
+        assertNull(Rutinas.entender("resumen"))
+        assertNull(Rutinas.entender("resúmeme este archivo"))
+    }
+
+    @Test fun avisos() {
+        assertEquals(Rutinas.Pedido.Aviso("Juan", false), Rutinas.entender("avísame si me escribe Juan"))
+        assertEquals(Rutinas.Pedido.Aviso("mi madre", false), Rutinas.entender("Ultra, avísame cuando me escriba mi madre"))
+        assertEquals(Rutinas.Pedido.Aviso("Juan", true), Rutinas.entender("avísame si me escribe Juan en voz alta"))
+        assertEquals(Rutinas.Pedido.QuitarAviso("Juan"), Rutinas.entender("deja de avisarme de Juan"))
+        assertEquals(Rutinas.Pedido.QuitarResumen, Rutinas.entender("quita el resumen de la mañana"))
+        assertEquals(Rutinas.Pedido.Listar, Rutinas.entender("mis rutinas"))
+        assertEquals(Rutinas.Pedido.ResumenAhora, Rutinas.entender("dame el resumen del día"))
+    }
+}
+
+class GitHubTest {
+    @Test fun consultas() {
+        assertEquals(GitHub.Pedido.Repos, GitHub.entender("mis repos"))
+        assertEquals(GitHub.Pedido.Cambios("nexo"), GitHub.entender("últimos cambios de nexo"))
+        assertEquals(GitHub.Pedido.Issues("buid nexo apk"), GitHub.entender("qué issues tengo abiertas en buid nexo apk"))
+        assertEquals(GitHub.Pedido.PullRequests("nexo"), GitHub.entender("pull requests de nexo"))
+        assertEquals(GitHub.Pedido.Compilacion("nexo"), GitHub.entender("cómo va la compilación de nexo"))
+        assertEquals(GitHub.Pedido.Readme("nexo"), GitHub.entender("léeme el readme de nexo"))
+        assertEquals(GitHub.Pedido.Archivo("Brain.kt", "nexo"), GitHub.entender("explícame el archivo Brain.kt de nexo"))
+        assertEquals(GitHub.Pedido.Buscar("login", "nexo"), GitHub.entender("busca login en el código de nexo"))
+        assertEquals(GitHub.Pedido.NuevaIssue("nexo", "falla el micro en el coche"), GitHub.entender("crea una issue en nexo: falla el micro en el coche"))
+    }
+
+    @Test fun noSonDeGithub() {
+        assertNull(GitHub.entender("qué hay de nuevo"))
+        assertNull(GitHub.entender("busca recetas de paella en google"))
+        assertNull(GitHub.entender("abre WhatsApp"))
+    }
+}
