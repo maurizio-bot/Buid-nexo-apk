@@ -45,7 +45,7 @@ object Permisos {
             Paso(id, titulo, para, restringido)
 
         /** Se activa en una pantalla de Ajustes de Android. */
-        class Ajuste(id: String, titulo: String, para: String, val abrir: (Context) -> Intent, restringido: Boolean = false) :
+        class Ajuste(id: String, titulo: String, para: String, restringido: Boolean = false, val abrir: (Context) -> Intent) :
             Paso(id, titulo, para, restringido)
     }
 
@@ -76,14 +76,14 @@ object Permisos {
             )
         }
         add(
-            Paso.Ajuste("notificaciones", "Leer notificaciones", "Para \"léeme las notificaciones\". Solo las guarda en memoria, no en disco.", { c ->
+            Paso.Ajuste("notificaciones", "Leer notificaciones", "Para \"léeme las notificaciones\". Solo las guarda en memoria, no en disco.", restringido = true) { c ->
                 UltraNotifications.settingsIntent(c)
-            }, restringido = true)
+            }
         )
         add(
-            Paso.Ajuste("control", "Control del teléfono (accesibilidad)", "Para pulsar y escribir en otras apps cuando se lo pides. En la lista, entra en Ultra Yo y actívalo.", {
+            Paso.Ajuste("control", "Control del teléfono (accesibilidad)", "Para pulsar y escribir en otras apps cuando se lo pides. En la lista, entra en Ultra Yo y actívalo.", restringido = true) {
                 Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            }, restringido = true)
+            }
         )
         add(
             Paso.Ajuste("bateria", "Sin límite de batería", "Para que Android no la duerma y oiga \"Ultra\" con la pantalla apagada.") { c ->
