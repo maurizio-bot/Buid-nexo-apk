@@ -34,7 +34,13 @@ class UltraNotifications : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        runCatching { note(this, sbn)?.let(::remember) }
+        runCatching {
+            note(this, sbn)?.let {
+                remember(it)
+                // "Avísame si me escribe X": solo si Maurizio lo pidió (ver Rutinas).
+                Rutinas.alLlegar(this, it.app, it.title, it.text)
+            }
+        }
     }
 
     data class Note(val key: String, val app: String, val title: String, val text: String, val time: Long)

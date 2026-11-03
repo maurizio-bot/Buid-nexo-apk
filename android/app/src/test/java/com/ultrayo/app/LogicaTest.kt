@@ -280,3 +280,25 @@ class AnticipaTest {
         assertFalse(Anticipa.esOrdenCompleta("sí pero cambia el texto"))
     }
 }
+
+class RutinasTest {
+    @Test fun resumenDeLaManana() {
+        assertEquals(Rutinas.Pedido.Resumen(8, 0, false), Rutinas.entender("cada mañana a las 8 dame un resumen"))
+        assertEquals(Rutinas.Pedido.Resumen(8, 30, false), Rutinas.entender("cada mañana a las ocho y media dame un resumen"))
+        assertEquals(Rutinas.Pedido.Resumen(7, 30, false), Rutinas.entender("ponme el resumen de la mañana a las 7:30"))
+        assertEquals(Rutinas.Pedido.Resumen(9, 0, true), Rutinas.entender("dame un resumen cada mañana a las 9 en voz alta"))
+        assertEquals(Rutinas.Pedido.Resumen(8, 0, false), Rutinas.entender("resumen matinal"))
+        assertNull(Rutinas.entender("resumen"))
+        assertNull(Rutinas.entender("resúmeme este archivo"))
+    }
+
+    @Test fun avisos() {
+        assertEquals(Rutinas.Pedido.Aviso("Juan", false), Rutinas.entender("avísame si me escribe Juan"))
+        assertEquals(Rutinas.Pedido.Aviso("mi madre", false), Rutinas.entender("Ultra, avísame cuando me escriba mi madre"))
+        assertEquals(Rutinas.Pedido.Aviso("Juan", true), Rutinas.entender("avísame si me escribe Juan en voz alta"))
+        assertEquals(Rutinas.Pedido.QuitarAviso("Juan"), Rutinas.entender("deja de avisarme de Juan"))
+        assertEquals(Rutinas.Pedido.QuitarResumen, Rutinas.entender("quita el resumen de la mañana"))
+        assertEquals(Rutinas.Pedido.Listar, Rutinas.entender("mis rutinas"))
+        assertEquals(Rutinas.Pedido.ResumenAhora, Rutinas.entender("dame el resumen del día"))
+    }
+}

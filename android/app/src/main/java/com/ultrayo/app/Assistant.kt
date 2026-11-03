@@ -131,6 +131,7 @@ object Assistant {
         }
         NeuralVoice.onDone = { utteranceDone(it) }
         Bluetooth.init(app)
+        Safe.run("programar las rutinas") { Rutinas.programar(app) }
         // El sentido de las palabras (sinónimos en fichas y recuerdos): unos 28 MB, en segundo plano.
         Sentido.preload(app)
         loadFastVoice()
@@ -718,6 +719,11 @@ object Assistant {
             // "Gracias", "nada más": se despide (y la conversación por voz no vuelve a escuchar).
             if (Referencias.esDespedida(command)) {
                 say(listOf("De nada.", "Aquí estoy.", "Cuando quieras.").random(), onDone)
+                return
+            }
+            // Rutinas que él encarga: "cada mañana a las 8 dame un resumen", "avísame si me escribe Juan".
+            Rutinas.atender(app, command) { summary -> notify(summary) }?.let { answer ->
+                say(answer, onDone)
                 return
             }
             Burbuja.order(command)?.let { on ->

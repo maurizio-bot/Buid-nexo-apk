@@ -891,6 +891,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             item { ControlCard() }
+            item { RutinasCard() }
             item { BrainCard() }
             item { CardsCard() }
             item { LearnedCard() }
@@ -1722,6 +1723,31 @@ class MainActivity : ComponentActivity() {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 GlowButton("Sí, hazlo", onClick = { Assistant.say(Control.confirm()) })
                 TextButton(onClick = { Assistant.say(Control.cancel()) }) { Text("No") }
+            }
+        }
+    }
+
+    /** Las rutinas que Maurizio ha activado (resumen de la mañana, avisos), con botón para quitarlas. */
+    @Composable
+    private fun RutinasCard() {
+        var rutinas by remember { mutableStateOf(Rutinas.lista(this@MainActivity)) }
+        Card {
+            SectionTitle(
+                "Rutinas",
+                "Solo las que tú le pidas: \"cada mañana a las 8 dame un resumen\" (agenda, tiempo y mensajes) o \"avísame si me escribe Juan\". " +
+                    "Añade \"en voz alta\" para que te lo diga si está escuchando.",
+            )
+            if (rutinas.isEmpty()) {
+                Text("No tienes ninguna.", color = UltraColors.Muted, fontSize = 13.sp)
+            }
+            rutinas.forEach { r ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(r.describir(), color = UltraColors.Text, modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        Rutinas.quitar(this@MainActivity, r.id)
+                        rutinas = Rutinas.lista(this@MainActivity)
+                    }) { Text("Quitar") }
+                }
             }
         }
     }
