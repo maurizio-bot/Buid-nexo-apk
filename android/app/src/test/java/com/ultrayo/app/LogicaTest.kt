@@ -302,3 +302,23 @@ class RutinasTest {
         assertEquals(Rutinas.Pedido.ResumenAhora, Rutinas.entender("dame el resumen del día"))
     }
 }
+
+class GitHubTest {
+    @Test fun consultas() {
+        assertEquals(GitHub.Pedido.Repos, GitHub.entender("mis repos"))
+        assertEquals(GitHub.Pedido.Cambios("nexo"), GitHub.entender("últimos cambios de nexo"))
+        assertEquals(GitHub.Pedido.Issues("buid nexo apk"), GitHub.entender("qué issues tengo abiertas en buid nexo apk"))
+        assertEquals(GitHub.Pedido.PullRequests("nexo"), GitHub.entender("pull requests de nexo"))
+        assertEquals(GitHub.Pedido.Compilacion("nexo"), GitHub.entender("cómo va la compilación de nexo"))
+        assertEquals(GitHub.Pedido.Readme("nexo"), GitHub.entender("léeme el readme de nexo"))
+        assertEquals(GitHub.Pedido.Archivo("Brain.kt", "nexo"), GitHub.entender("explícame el archivo Brain.kt de nexo"))
+        assertEquals(GitHub.Pedido.Buscar("login", "nexo"), GitHub.entender("busca login en el código de nexo"))
+        assertEquals(GitHub.Pedido.NuevaIssue("nexo", "falla el micro en el coche"), GitHub.entender("crea una issue en nexo: falla el micro en el coche"))
+    }
+
+    @Test fun noSonDeGithub() {
+        assertNull(GitHub.entender("qué hay de nuevo"))
+        assertNull(GitHub.entender("busca recetas de paella en google"))
+        assertNull(GitHub.entender("abre WhatsApp"))
+    }
+}

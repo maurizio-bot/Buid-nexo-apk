@@ -896,6 +896,7 @@ class MainActivity : ComponentActivity() {
             item { CardsCard() }
             item { LearnedCard() }
             item { ExpertCard() }
+            item { GitHubCard() }
             item {
                 Card {
                     SectionTitle("Voz")
@@ -1685,6 +1686,47 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+        }
+    }
+
+    /** Sus proyectos en GitHub: usuario y clave opcional (para lo privado, buscar en el código y crear issues). */
+    @Composable
+    private fun GitHubCard() {
+        var user by remember { mutableStateOf(GitHub.user(this@MainActivity)) }
+        var token by remember { mutableStateOf(GitHub.token(this@MainActivity)) }
+        Card {
+            SectionTitle(
+                "GitHub (tus proyectos de código)",
+                "Dile \"mis repos\", \"últimos cambios de nexo\", \"issues de nexo\", \"cómo va la compilación de nexo\", \"lee el README de nexo\" " +
+                    "o \"busca login en el código de nexo\". Sin clave solo ve lo público. Crear una issue siempre te lo pregunta antes.",
+            )
+            OutlinedTextField(
+                value = user,
+                onValueChange = {
+                    user = it
+                    GitHub.setUser(this@MainActivity, it)
+                },
+                label = { Text("Usuario de GitHub") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Clave opcional: github.com > Settings > Developer settings > Personal access tokens > Fine-grained, con permiso de lectura " +
+                    "(y de issues si quieres que las cree). Se guarda solo en el teléfono.",
+                color = UltraColors.Muted,
+                fontSize = 13.sp,
+            )
+            OutlinedTextField(
+                value = token,
+                onValueChange = {
+                    token = it
+                    GitHub.setToken(this@MainActivity, it)
+                },
+                label = { Text("Clave de GitHub (opcional)") },
+                singleLine = true,
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 

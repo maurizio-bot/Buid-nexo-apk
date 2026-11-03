@@ -200,7 +200,7 @@ object Assistant {
                         Ai.brain = Brain(
                             downloader.file.path,
                             app.cacheDir.path,
-                            listOf(PhoneTools(app), ControlTools(app), KnowledgeTools(app), CardTools(app), DataTools(app), SkillTools(app), SelfTools(app)),
+                            listOf(PhoneTools(app), ControlTools(app), KnowledgeTools(app), CardTools(app), DataTools(app), SkillTools(app), SelfTools(app), GitHubTools(app)),
                         ).also {
                             it.load(useGpu = gpu)
                             GpuGuard.afterLoad(app, tried = gpu, onGpu = it.onGpu)
@@ -724,6 +724,28 @@ object Assistant {
             // Rutinas que él encarga: "cada mañana a las 8 dame un resumen", "avísame si me escribe Juan".
             Rutinas.atender(app, command) { summary -> notify(summary) }?.let { answer ->
                 say(answer, onDone)
+                return
+            }
+            // Sus proyectos en GitHub: repos, cambios, issues, compilación, README, archivos y buscar en el código.
+            GitHub.entender(command)?.let { pedido ->
+                thinking = true
+                status = "Mirando GitHub…"
+                scope.launch {
+                    val result = runCatching { withContext(Dispatchers.IO) { GitHub.hacer(app, pedido, text) } }
+                    thinking = false
+                    result.fold(
+                        onSuccess = { r ->
+                            when (r) {
+                                is GitHub.Resultado.Texto -> say(r.texto, onDone)
+                                is GitHub.Resultado.ParaModelo ->
+                                    if (Ai.brain == null) say(r.prompt.substringBefore("\n\nPetición").take(1500), onDone)
+                                    else askModel(text, r.prompt, null, history, onDone)
+                                is GitHub.Resultado.Confirmar -> say(Control.ask(r.plan, r.hacer), onDone)
+                            }
+                        },
+                        onFailure = { say("No pude consultar GitHub: ${Safe.describe(it)}.", onDone) },
+                    )
+                }
                 return
             }
             Burbuja.order(command)?.let { on ->
