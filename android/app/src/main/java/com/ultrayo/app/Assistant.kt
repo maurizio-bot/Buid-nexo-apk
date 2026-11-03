@@ -131,6 +131,8 @@ object Assistant {
         }
         NeuralVoice.onDone = { utteranceDone(it) }
         Bluetooth.init(app)
+        // El sentido de las palabras (sinónimos en fichas y recuerdos): unos 28 MB, en segundo plano.
+        Sentido.preload(app)
         loadFastVoice()
     }
 

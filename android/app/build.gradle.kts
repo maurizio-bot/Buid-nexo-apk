@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.19.1"
+        versionCode = 28
+        versionName = "0.20.0"
         // Pruebas automáticas en un emulador (GitHub Actions): ver android/scripts/prueba-emulador.sh
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -21,6 +21,13 @@ android {
     testOptions {
         // Las pruebas rápidas (sin teléfono) usan clases de Android vacías: que devuelvan 0/null en vez de fallar.
         unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            it.maxHeapSize = "1g"
+            it.testLogging {
+                showStandardStreams = true
+                events("failed", "skipped")
+            }
+        }
     }
 
     // Firma fija para que cada versión nueva se instale encima de la anterior

@@ -25,6 +25,12 @@ jobs:
         run: ./scripts/motor-imagenes.sh
       - name: Traer el motor de voz
         run: ./scripts/motor-voz.sh
+      - uses: actions/cache@v4
+        with:
+          path: android/build/sentido-descarga
+          key: sentido-static-mrl-multilingual-v1
+      - name: Traer el sentido de las palabras (sinónimos)
+        run: ./scripts/modelo-sentido.sh
       - name: Pruebas rápidas (lógica, sin teléfono)
         run: ./gradlew testDebugUnitTest --no-daemon
       - run: ./gradlew assembleDebug --no-daemon
@@ -63,6 +69,12 @@ jobs:
         run: ./scripts/motor-imagenes.sh
       - name: Traer el motor de voz
         run: ./scripts/motor-voz.sh
+      - uses: actions/cache@v4
+        with:
+          path: android/build/sentido-descarga
+          key: sentido-static-mrl-multilingual-v1
+      - name: Traer el sentido de las palabras (sinónimos)
+        run: ./scripts/modelo-sentido.sh
       - name: Compilar la app y las pruebas
         run: ./gradlew assembleDebug assembleDebugAndroidTest --no-daemon
       - name: Activar KVM para el emulador

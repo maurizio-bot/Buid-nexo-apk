@@ -173,6 +173,20 @@ class EmuladorTest {
     }
 
     @Test
+    fun e2_sentidoCargadoEnElTelefono() {
+        openApp()
+        val end = SystemClock.uptimeMillis() + 30_000
+        while (!Sentido.ready && SystemClock.uptimeMillis() < end) SystemClock.sleep(200)
+        assertTrue("El sentido de las palabras no se cargó desde el APK", Sentido.ready)
+        val near = Sentido.similarity("coche", "vehículo")!!
+        val far = Sentido.similarity("coche", "manzana")!!
+        note("> sentido: coche/vehículo %.2f, coche/manzana %.2f\n".format(near, far))
+        assertTrue(near > far)
+        ask("nuevo proyecto Nexo: aplicación de ventas por internet para mi negocio")
+        ask("recuerdas la app de la tienda online")
+    }
+
+    @Test
     fun f_ordenesQueAbrenOtrasApps() {
         openApp()
         ask("pon una alarma a las 7 y media")
