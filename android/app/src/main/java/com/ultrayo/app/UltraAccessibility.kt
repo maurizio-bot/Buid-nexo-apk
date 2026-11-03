@@ -75,6 +75,9 @@ class UltraAccessibility : AccessibilityService() {
 
     // --- Leer la pantalla ---
 
+    /** La app que está delante ahora mismo (su paquete), o null si no se ve. */
+    fun currentPackage(): String? = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+
     /** El texto que se ve en la pantalla, con los botones y campos marcados. */
     fun readScreen(maxChars: Int = 2500): String {
         val root = rootInActiveWindow ?: return "No puedo ver la pantalla ahora mismo."

@@ -184,7 +184,7 @@ class UltraService : Service() {
      * Empieza a conversar: al oír "Ultra" o al tocar el reactor. [said] es lo que dijo detrás de
      * "Ultra" de un tirón ("Ultra, ¿qué hora es?"): si hay algo, se contesta directamente sin volver a escuchar.
      */
-    fun wake(said: String = "") {
+    fun wake(said: String = "", beep: Boolean = true) {
         // No hacer caso de su propia voz (por ejemplo cuando dice "Ultra Yo"). Si estaba "ocupado"
         // pero ya no habla, ni piensa, ni escucha, es que lo cortaron a medias: se puede volver a empezar.
         if (Assistant.speaking || Assistant.thinking || Assistant.listening) return
@@ -193,7 +193,7 @@ class UltraService : Service() {
         stopVosk()
         NeuralWake.stop()
         val command = said.trim().takeIf { it.count(Char::isLetterOrDigit) >= 2 }
-        if (command == null) beep()
+        if (command == null && beep) beep()
         val first = Ear { onHeard, onNothing, onFailed ->
             // La primera vez entrega lo que ya dijo con "Ultra"; luego, a escuchar como siempre.
             val pending = pendingCommand

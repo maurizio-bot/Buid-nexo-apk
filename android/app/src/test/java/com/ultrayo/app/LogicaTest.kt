@@ -147,3 +147,49 @@ class OrdenesTest {
         assertNull(ImageCommands.parse("qué hora es", hasImage = false))
     }
 }
+
+class TareasTest {
+
+    @Test fun vueloYWhatsApp() {
+        val pasos = Tareas.plan("Ultra, busca el vuelo más barato a Madrid y mándaselo a Juan por WhatsApp")!!
+        assertEquals(2, pasos.size)
+        assertEquals("el vuelo más barato a Madrid", (pasos[0] as Paso.Buscar).consulta)
+        val enviar = pasos[1] as Paso.Enviar
+        assertEquals("Juan", enviar.quien)
+        assertFalse(enviar.sms)
+    }
+
+    @Test fun variosPasosConLuego() {
+        val pasos = Tareas.plan("abre WhatsApp, luego pulsa Chats y después lee la pantalla")!!
+        assertEquals(3, pasos.size)
+        assertTrue(pasos.all { it is Paso.Orden })
+    }
+
+    @Test fun enviarPorSms() {
+        val pasos = Tareas.plan("mira el tiempo en Sevilla mañana y envíaselo a mamá por SMS")!!
+        assertTrue(pasos[0] is Paso.Buscar)
+        assertTrue((pasos[1] as Paso.Enviar).sms)
+        assertEquals("mamá", (pasos[1] as Paso.Enviar).quien)
+    }
+
+    @Test fun unaSolaOrdenNoEsPlan() {
+        assertNull(Tareas.plan("mándale un whatsapp a Juan que llego tarde y que me espere"))
+        assertNull(Tareas.plan("busca recetas de paella en google"))
+        assertNull(Tareas.plan("pon una alarma a las 7 y media"))
+        assertNull(Tareas.plan("qué hora es"))
+        assertNull(Tareas.plan("busca vuelos de ida y vuelta a Roma"))
+    }
+
+    @Test fun mensajeConTextoEsOrden() {
+        val pasos = Tareas.plan("abre WhatsApp y mándale un whatsapp a Juan que llego tarde")!!
+        assertTrue(pasos[1] is Paso.Orden)
+    }
+
+    @Test fun planDelModelo() {
+        val pasos = Tareas.desdeModelo("1. busca hoteles en Roma baratos\n2. mándaselo a Pedro")!!
+        assertEquals(2, pasos.size)
+        assertTrue(pasos[0] is Paso.Buscar)
+        assertTrue(pasos[1] is Paso.Enviar)
+        assertTrue(Tareas.textoDelPlan(pasos).startsWith("Plan de 2 pasos"))
+    }
+}

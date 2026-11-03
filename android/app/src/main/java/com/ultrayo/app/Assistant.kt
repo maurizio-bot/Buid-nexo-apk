@@ -509,6 +509,28 @@ object Assistant {
         maybeFinishSpeech()
     }
 
+    /** La pantalla de Ultra está delante (entonces puede usar el micrófono sin el servicio). */
+    @Volatile
+    var visible = false
+
+    /**
+     * Dice una pregunta (por ejemplo "¿Lo envío?") y, si contesta por voz, se queda escuchando la respuesta
+     * sin que Maurizio tenga que decir "Ultra" otra vez. Desde cualquier hilo.
+     */
+    fun sayAndListen(text: String) = main.post {
+        say(text) { listenForAnswer() }
+    }.let {}
+
+    /** Abre el micrófono para la respuesta: con el servicio de "Ultra" si está, o desde la pantalla si se ve. */
+    fun listenForAnswer() {
+        if (!memory.voiceReplies || listening || thinking || speaking) return
+        val service = UltraService.instance
+        when {
+            service != null -> service.wake(beep = false)
+            visible -> startConversation()
+        }
+    }
+
     /** Dice algo que llega más tarde (por ejemplo "Enviado"), desde cualquier hilo. */
     fun notify(text: String) = main.post { say(text) }.let {}
 
@@ -662,6 +684,11 @@ object Assistant {
             if (voiceMode.containsMatchIn(command)) {
                 memory.voiceReplies = true
                 say("Hecho, vuelvo a contestarte en voz alta.", onDone)
+                return
+            }
+            // Tareas de varios pasos ("busca X y mándaselo a Juan"): plan, su sí, y paso a paso.
+            Tareas.plan(command)?.let { pasos ->
+                say(Tareas.proponer(app, pasos), onDone)
                 return
             }
             // Órdenes del teléfono: al instante, sin pasar por el modelo.

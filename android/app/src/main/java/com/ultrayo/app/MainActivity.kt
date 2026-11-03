@@ -285,8 +285,14 @@ class MainActivity : ComponentActivity() {
         if (intent.action == ACTION_TALK) talkRequested = true
     }
 
+    override fun onPause() {
+        Assistant.visible = false
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
+        Assistant.visible = true
         locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
         wakeOn = UltraService.instance != null
         mediaAccess = DeviceFiles.hasMedia(this)
