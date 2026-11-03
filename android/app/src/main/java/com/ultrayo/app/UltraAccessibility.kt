@@ -39,15 +39,40 @@ class UltraAccessibility : AccessibilityService() {
         instance = this
         Control.init(this)
         Control.log("Control del teléfono activado")
+        if (Burbuja.enabled(this)) bubble(true)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    private var burbuja: Burbuja? = null
+
+    /** Pone o quita la burbuja flotante. */
+    fun bubble(on: Boolean) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post { bubble(on) }
+            return
+        }
+        if (on) {
+            (burbuja ?: Burbuja(this).also { burbuja = it }).show()
+        } else {
+            burbuja?.hide()
+            burbuja = null
+        }
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val pkg = event.packageName?.toString() ?: return
+        // Con Ultra delante la burbuja se esconde; vuelve al pasar a otra app (el teclado no cuenta).
+        if (pkg.contains("inputmethod") || pkg.contains("keyboard") || pkg == "com.android.systemui") return
+        burbuja?.ultraInFront(pkg == packageName)
+    }
 
     override fun onInterrupt() {}
 
     override fun onDestroy() {
         if (instance === this) instance = null
         hideStopButton()
+        burbuja?.hide()
+        burbuja = null
         super.onDestroy()
     }
 

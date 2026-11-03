@@ -693,6 +693,10 @@ object Assistant {
                 say(listOf("De nada.", "Aquí estoy.", "Cuando quieras.").random(), onDone)
                 return
             }
+            Burbuja.order(command)?.let { on ->
+                say(Burbuja.switch(app, on), onDone)
+                return
+            }
             // "¿Qué es esto?", "resume lo que estoy leyendo", "mira con la cámara": que vea.
             Vista.pedido(command)?.let { pedido ->
                 lookAt(pedido, text, history, onDone)

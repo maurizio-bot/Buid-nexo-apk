@@ -260,3 +260,12 @@ class VistaTest {
         assertNull(Vista.pedido("resume la reunión de ayer"))
     }
 }
+
+class BurbujaTest {
+    @Test fun ordenes() {
+        assertEquals(true, Burbuja.order("pon la burbuja"))
+        assertEquals(true, Burbuja.order("Ultra, activa la burbuja flotante"))
+        assertEquals(false, Burbuja.order("quita la burbuja"))
+        assertNull(Burbuja.order("pon música"))
+    }
+}

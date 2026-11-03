@@ -1751,6 +1751,16 @@ class MainActivity : ComponentActivity() {
                 )
                 GlowButton("Activar control del teléfono", onClick = { UltraAccessibility.openSettings(this@MainActivity) }, Modifier.fillMaxWidth())
             }
+            var bubbleOn by remember { mutableStateOf(Burbuja.enabled(this@MainActivity)) }
+            SettingSwitch(
+                "Burbuja flotante",
+                "Un botón encima de cualquier app para hablarle sin salir de lo que haces. Tócala para hablar, mantenla para abrir Ultra, arrástrala abajo al centro para quitarla." +
+                    if (controlOn) "" else " Necesita el control del teléfono.",
+                bubbleOn,
+            ) {
+                Burbuja.switch(this@MainActivity, it)
+                bubbleOn = it
+            }
             if (!phoneAccess) {
                 GlowButton("Permitir contactos, llamadas y SMS", onClick = { askPhone.launch(phonePermissions) }, Modifier.fillMaxWidth())
             }
