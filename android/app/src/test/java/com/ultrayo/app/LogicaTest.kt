@@ -193,3 +193,51 @@ class TareasTest {
         assertTrue(Tareas.textoDelPlan(pasos).startsWith("Plan de 2 pasos"))
     }
 }
+
+class ReferenciasTest {
+
+    @Test fun mandaselo() {
+        val r = Referencias.resolver("mándaselo a Juan por WhatsApp", "El vuelo más barato es de Iberia, 49 euros.")
+        assertEquals(
+            "mándale un whatsapp a Juan que El vuelo más barato es de Iberia, 49 euros.",
+            (r as Referencias.Resuelto.Orden).texto,
+        )
+        val sms = Referencias.resolver("envíaselo a mamá por SMS", "Mañana llueve.") as Referencias.Resuelto.Orden
+        assertTrue(sms.texto.startsWith("mándale un sms a mamá que"))
+    }
+
+    @Test fun alDeAntes() {
+        Referencias.ultimoContacto = "Pepe Pérez"
+        assertEquals("llama a Pepe Pérez", (Referencias.resolver("llámale", null) as Referencias.Resuelto.Orden).texto)
+        assertEquals(
+            "mándale un whatsapp a Pepe Pérez que llego tarde",
+            (Referencias.resolver("mándale un whatsapp que llego tarde", null) as Referencias.Resuelto.Orden).texto,
+        )
+        assertEquals(
+            "mándale un whatsapp a Pepe Pérez que Son las 5.",
+            (Referencias.resolver("mándaselo", "Son las 5.") as Referencias.Resuelto.Orden).texto,
+        )
+        Referencias.ultimoContacto = null
+        assertNull(Referencias.resolver("llámale", null))
+    }
+
+    @Test fun repetirCopiarYEnlace() {
+        assertTrue(Referencias.resolver("repítelo", "Hola") is Referencias.Resuelto.Repetir)
+        assertTrue(Referencias.resolver("cópialo", "Hola") is Referencias.Resuelto.Copiar)
+        val link = Referencias.resolver("ábrelo", "Mira aquí: https://ejemplo.com/vuelos.") as Referencias.Resuelto.AbrirEnlace
+        assertEquals("https://ejemplo.com/vuelos", link.url)
+    }
+
+    @Test fun noSeRefiereANada() {
+        assertNull(Referencias.resolver("mándale un whatsapp a Juan que llego tarde", "Hola"))
+        assertNull(Referencias.resolver("manda a Juan", "Hola"))
+        assertNull(Referencias.resolver("qué hora es", "Hola"))
+    }
+
+    @Test fun despedidas() {
+        assertTrue(Referencias.esDespedida("Gracias"))
+        assertTrue(Referencias.esDespedida("vale, gracias"))
+        assertTrue(Referencias.esDespedida("nada más"))
+        assertFalse(Referencias.esDespedida("gracias, ahora pon música"))
+    }
+}

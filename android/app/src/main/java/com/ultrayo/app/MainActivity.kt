@@ -906,6 +906,15 @@ class MainActivity : ComponentActivity() {
                     WakeBatteryHint()
                     FastVoiceSettings()
                     BluetoothSettings()
+                    var followUp by remember { mutableStateOf(memory.followUp) }
+                    SettingSwitch(
+                        "Seguir escuchando tras responder",
+                        "Conversación continua: después de contestar te escucha unos segundos sin que digas \"Ultra\". Di \"gracias\" o \"nada más\" para terminar.",
+                        followUp,
+                    ) {
+                        memory.followUp = it
+                        followUp = it
+                    }
                     SettingSwitch(
                         "Contestar en voz alta",
                         "Si lo apagas, contesta por escrito. También puedes decirle \"modo texto\" o \"modo voz\".",

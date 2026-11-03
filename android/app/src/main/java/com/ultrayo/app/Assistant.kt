@@ -413,9 +413,11 @@ object Assistant {
      */
     private fun reply(text: String, ear: Ear, onEnd: () -> Unit) {
         bargeIn = if (neuralEarOn() && memory.bargeIn) { heard -> reply(heard, ear, onEnd) } else null
+        val bye = Referencias.esDespedida(text)
         send(text) {
             bargeIn = null
-            if (memory.voiceReplies) converse(ear, onEnd) else onEnd()
+            // Sigue escuchando unos segundos sin tener que decir "Ultra" otra vez (salvo que se despida).
+            if (memory.voiceReplies && memory.followUp && !bye) converse(ear, onEnd) else onEnd()
         }
     }
 
@@ -685,6 +687,42 @@ object Assistant {
                 memory.voiceReplies = true
                 say("Hecho, vuelvo a contestarte en voz alta.", onDone)
                 return
+            }
+            // "Gracias", "nada más": se despide (y la conversación por voz no vuelve a escuchar).
+            if (Referencias.esDespedida(command)) {
+                say(listOf("De nada.", "Aquí estoy.", "Cuando quieras.").random(), onDone)
+                return
+            }
+            // "Mándaselo a Juan", "llámale", "ábrelo", "repítelo": lo de antes, sin repetir nombres.
+            val previous = history.lastOrNull { it.role == "assistant" }?.content
+            when (val ref = Referencias.resolver(command, previous)) {
+                is Referencias.Resuelto.Orden -> {
+                    val answer = QuickActions.handle(app, ref.texto)
+                        ?: runCatching { CardCommands.handle(ref.texto, app) }.getOrNull()
+                    if (answer != null) {
+                        say(answer, onDone)
+                        return
+                    }
+                }
+                Referencias.Resuelto.Repetir -> {
+                    say(previous.orEmpty(), onDone)
+                    return
+                }
+                Referencias.Resuelto.Copiar -> {
+                    val clip = app.getSystemService(android.content.ClipboardManager::class.java)
+                    clip?.setPrimaryClip(android.content.ClipData.newPlainText("Ultra Yo", previous.orEmpty()))
+                    say("Copiado.", onDone)
+                    return
+                }
+                is Referencias.Resuelto.AbrirEnlace -> {
+                    if (locked()) return say("Desbloquea el teléfono y te lo abro.", onDone)
+                    val opened = runCatching {
+                        app.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(ref.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }.isSuccess
+                    say(if (opened) "Abriendo el enlace." else "No pude abrir el enlace.", onDone)
+                    return
+                }
+                null -> {}
             }
             // Tareas de varios pasos ("busca X y mándaselo a Juan"): plan, su sí, y paso a paso.
             Tareas.plan(command)?.let { pasos ->

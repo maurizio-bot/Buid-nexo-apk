@@ -451,6 +451,7 @@ object QuickActions {
         val name = m.groupValues[1]
         if (name.equals("editor", true) || name.startsWith("editor de")) return null
         val app = findApp(c, name) ?: return null
+        Referencias.ultimaApp = app.first
         if (locked(c)) return "Desbloquea el teléfono y abro ${app.first}."
         val intent = c.packageManager.getLaunchIntentForPackage(app.second) ?: return "No se puede abrir ${app.first}."
         return start(c, intent, "No se puede abrir ${app.first}.") ?: "Abriendo ${app.first}.".also { Control.log("Abrió ${app.first}") }
@@ -511,6 +512,7 @@ object QuickActions {
             ?: found.firstOrNull { norm(it.name).contains(wanted) }
             ?: soundsLike(found, wanted)
             ?: return null
+        Referencias.ultimoContacto = best.name
         return best.copy(number = international(c, best.number))
     }
 
