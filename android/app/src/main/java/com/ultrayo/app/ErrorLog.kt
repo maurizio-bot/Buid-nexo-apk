@@ -49,18 +49,42 @@ object ErrorLog {
         }
     }
 
+    /** Lo que está en marcha ahora mismo, por tipo ("modelo", "herramienta", "voz"…). */
+    private val running = LinkedHashMap<String, String>()
+
     /**
-     * Lo que se está haciendo ahora mismo (por ejemplo "herramienta buscarArchivos").
-     * Se escribe en disco antes de hacerlo; si la app se cierra de golpe, al volver se sabe.
+     * Apunta que empieza algo arriesgado (el motor del modelo contestando, una herramienta, el oído…).
+     * Se escribe en disco antes de hacerlo; si la app se cierra de golpe, al volver se sabe qué era.
+     * Varias cosas pueden estar en marcha a la vez (por ejemplo el oído de la palabra "Ultra" y el modelo).
      */
-    fun step(what: String) {
-        runCatching { stepFile()?.writeText(DATE.format(Date()) + " · " + what) }
+    fun begin(key: String, what: String) {
+        runCatching {
+            synchronized(running) {
+                running[key] = DATE.format(Date()) + " · " + what
+                saveRunning()
+            }
+        }
     }
 
-    /** Lo que estaba en marcha terminó bien. */
-    fun stepDone() {
-        runCatching { stepFile()?.delete() }
+    /** Lo que estaba en marcha con esa clave terminó (bien o con un error ya apuntado). */
+    fun end(key: String) {
+        runCatching {
+            synchronized(running) {
+                if (running.remove(key) != null) saveRunning()
+            }
+        }
     }
+
+    private fun saveRunning() {
+        val f = stepFile() ?: return
+        if (running.isEmpty()) f.delete() else f.writeText(running.values.joinToString("\n"))
+    }
+
+    /** Lo que se está haciendo ahora mismo (una herramienta). */
+    fun step(what: String) = begin("herramienta", what)
+
+    /** La herramienta terminó. */
+    fun stepDone() = end("herramienta")
 
     fun read(): String = runCatching { file()?.takeIf { it.exists() }?.readText() }.getOrNull().orEmpty()
 
@@ -70,24 +94,42 @@ object ErrorLog {
 
     /**
      * Al abrir la app: pregunta a Android si la última vez se cerró por un fallo y lo apunta,
-     * junto con lo que estaba haciendo en ese momento. Devuelve el informe si hubo un cierre
+     * junto con lo que estaba haciendo en ese momento y, si fue un fallo nativo, el resumen del
+     * informe de Android (qué librería y qué función). Devuelve el informe si hubo un cierre
      * que la app no pudo apuntar por sí misma (fallo nativo), para enseñarlo en pantalla.
      */
     fun checkLastExit(context: Context): String? = runCatching {
-        val pending = stepFile()?.takeIf { it.exists() }?.readText()
+        val pending = stepFile()?.takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
         stepFile()?.delete()
-        val reason = lastExitReason(context)
-        if (reason == null && pending == null) return@runCatching null
+        val exit = lastExit(context)
+        // Con Android 11 o más nuevo se sabe si fue un fallo: si Android no dice nada, se cerró normal
+        // (deslizada, actualizada, apagada) aunque hubiera algo en marcha, como esperar la palabra "Ultra".
+        if (exit == null && (Build.VERSION.SDK_INT >= 30 || pending == null)) return@runCatching null
+        val native = exit?.native == true
+        // Si el motor estaba en la GPU cuando se cerró de golpe, la próxima vez va al procesador.
+        val gpuBlamed = native && (exit?.tombstone?.looksLikeGpu == true || pending?.contains("en la GPU") == true)
+        if (gpuBlamed) GpuGuard.markBroken(context)
         val report = buildString {
             append("La app se cerró sola la última vez.\n")
-            if (reason != null) append("Motivo según Android: ").append(reason).append('\n')
-            if (pending != null) append("Lo que estaba haciendo: ").append(pending).append('\n')
+            append("Versión de Ultra Yo: ").append(version(context)).append(" · Android ").append(Build.VERSION.RELEASE)
+                .append(" · ").append(Build.MODEL).append('\n')
+            if (exit != null) append("Motivo según Android: ").append(exit.reason).append('\n')
+            if (pending != null) append("Lo que estaba haciendo:\n").append(pending).append('\n')
+            else if (exit != null) append("Lo que estaba haciendo: nada apuntado (no era el modelo contestando ni una herramienta).\n")
+            exit?.tombstone?.let { append(it.text()).append('\n') }
+            if (native && exit?.tombstone == null) append("Android no dejó el informe del fallo nativo.\n")
+            if (gpuBlamed) append("Parece un fallo de la GPU: a partir de ahora el modelo usa el procesador (Ajustes > Usar la GPU para volver a probar).\n")
         }
         add(report.trim())
         report
     }.getOrNull()
 
-    private fun lastExitReason(context: Context): String? {
+    private class Exit(val reason: String, val native: Boolean, val tombstone: Tombstone.Info?)
+
+    private fun version(context: Context): String =
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"
+
+    private fun lastExit(context: Context): Exit? {
         if (Build.VERSION.SDK_INT < 30) return null
         val prefs = context.getSharedPreferences("ultrayo", Context.MODE_PRIVATE)
         val seen = prefs.getLong("ultimo_cierre_visto", 0)
@@ -105,8 +147,12 @@ object ErrorLog {
             ApplicationExitInfo.REASON_SIGNALED -> "señal del sistema ${info.status}"
             else -> return null // cerrada por Maurizio, actualizada, etc.: no es un fallo
         }
-        return "$kind, ${DATE.format(Date(info.timestamp))}" +
-            (info.description?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "") +
-            ", memoria usada ${info.pss / 1024} MB"
+        val native = info.reason == ApplicationExitInfo.REASON_CRASH_NATIVE
+        // En Android 12 o más nuevo, Android guarda el informe del fallo nativo (el "tombstone").
+        val tombstone = if (native && Build.VERSION.SDK_INT >= 31) Tombstone.read(runCatching { info.traceInputStream }.getOrNull()) else null
+        val memory = (info.pss / 1024).takeIf { it > 0 }?.let { ", memoria usada $it MB" } ?: ""
+        val reason = "$kind, ${DATE.format(Date(info.timestamp))}" +
+            (info.description?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "") + memory
+        return Exit(reason, native, tombstone)
     }
 }

@@ -35,6 +35,13 @@ object NeuralEar {
         private set
 
     private var recognizer: OnlineRecognizer? = null
+
+    /**
+     * La conversación y la palabra "Ultra" usan el mismo reconocedor desde hilos distintos. Cada una con
+     * su propio "stream", pero por seguridad la librería nativa nunca trabaja con dos a la vez:
+     * cada paso dura milisegundos, así que esperar aquí no se nota.
+     */
+    private val decodeLock = Any()
     private val sessions = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
@@ -97,16 +104,20 @@ object NeuralEar {
      */
     fun transcribe(samples: FloatArray): String {
         val rec = recognizer ?: return ""
-        val stream = rec.createStream()
+        ErrorLog.begin("oido", "escribiendo una frase oída (oído rápido sherpa-onnx)")
+        val stream = synchronized(decodeLock) { rec.createStream() }
         return try {
             stream.acceptWaveform(samples, RATE)
             // El modelo necesita algo de silencio detrás para soltar las últimas palabras.
             stream.acceptWaveform(FloatArray(RATE * 13 / 10), RATE)
             stream.inputFinished()
-            while (rec.isReady(stream)) rec.decode(stream)
-            rec.getResult(stream).text.trim()
+            synchronized(decodeLock) {
+                while (rec.isReady(stream)) rec.decode(stream)
+                rec.getResult(stream).text.trim()
+            }
         } finally {
-            stream.release()
+            synchronized(decodeLock) { stream.release() }
+            ErrorLog.end("oido")
         }
     }
 
@@ -210,7 +221,8 @@ object NeuralEar {
         } else {
             emptyList()
         }
-        val stream = rec.createStream()
+        val stream = synchronized(decodeLock) { rec.createStream() }
+        ErrorLog.begin("escucha", "escuchándote (oído rápido sherpa-onnx)")
         val pcm = ShortArray(CHUNK)
         val samples = FloatArray(CHUNK)
         var last = ""
@@ -230,16 +242,17 @@ object NeuralEar {
                 }
                 for (i in 0 until n) samples[i] = pcm[i] / 32768f
                 stream.acceptWaveform(if (n == CHUNK) samples else samples.copyOf(n), RATE)
-                while (rec.isReady(stream)) rec.decode(stream)
-                val text = rec.getResult(stream).text.trim()
-                val endpoint = rec.isEndpoint(stream)
+                val (text, endpoint) = synchronized(decodeLock) {
+                    while (rec.isReady(stream)) rec.decode(stream)
+                    rec.getResult(stream).text.trim() to rec.isEndpoint(stream)
+                }
                 if (!interrupted) {
                     // Mientras Ultra habla: solo cuenta si no es su propio eco.
                     if (text.isNotEmpty() && !isEcho(text)) {
                         interrupted = true
                         main.post { if (mine == session) onInterrupt() }
                     } else if (endpoint) {
-                        rec.reset(stream)
+                        synchronized(decodeLock) { rec.reset(stream) }
                         last = ""
                         continue
                     }
@@ -264,7 +277,8 @@ object NeuralEar {
             runCatching { record.stop() }
             record.release()
             effects.forEach { runCatching { it.release() } }
-            stream.release()
+            synchronized(decodeLock) { stream.release() }
+            ErrorLog.end("escucha")
         }
     }
 
