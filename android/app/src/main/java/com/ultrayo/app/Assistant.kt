@@ -518,7 +518,7 @@ object Assistant {
      * sin que Maurizio tenga que decir "Ultra" otra vez. Desde cualquier hilo.
      */
     fun sayAndListen(text: String) = main.post {
-        say(text) { listenForAnswer() }
+        say(text, onDone = { listenForAnswer() })
     }.let {}
 
     /** Abre el micrófono para la respuesta: con el servicio de "Ultra" si está, o desde la pantalla si se ve. */
