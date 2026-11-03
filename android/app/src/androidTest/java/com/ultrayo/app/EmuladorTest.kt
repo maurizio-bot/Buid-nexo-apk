@@ -92,6 +92,14 @@ class EmuladorTest {
     fun a_abreSinCerrarse() {
         App.crashFile(context).delete()
         openApp()
+        // La primera vez sale el asistente de permisos. El script ya los dio con "pm grant", así que
+        // los de ventana tienen que salir como concedidos (✓).
+        assertTrue("No salió el asistente de permisos", device.wait(Until.hasObject(By.text("PERMISOS DE ULTRA")), 10_000))
+        assertTrue("Los permisos concedidos no salen con ✓", device.hasObject(By.text("✓")))
+        shot("01-permisos")
+        device.findObject(By.desc("Cerrar"))?.click()
+        SystemClock.sleep(800)
+        assertTrue("El asistente no se cerró", device.wait(Until.gone(By.text("PERMISOS DE ULTRA")), 5_000))
         shot("01-inicio")
         assertAlive("el arranque")
     }
@@ -122,6 +130,26 @@ class EmuladorTest {
         SystemClock.sleep(800)
         shot("04-ajustes-cerrados")
         assertAlive("cerrar los ajustes")
+    }
+
+    @Test
+    fun b2_permisosDesdeAjustes() {
+        openApp()
+        device.wait(Until.findObject(By.desc("Memoria y ajustes")), 10_000)?.click()
+        val boton = device.wait(Until.findObject(By.text("Revisar permisos")), 10_000)
+        assertTrue("No está el botón Revisar permisos en Ajustes", boton != null)
+        boton!!.click()
+        assertTrue("No se abrió el asistente desde Ajustes", device.wait(Until.hasObject(By.text("PERMISOS DE ULTRA")), 10_000))
+        // Bajar hasta el final: todos los pasos se dibujan sin cerrar la app.
+        val w = device.displayWidth
+        val h = device.displayHeight
+        repeat(6) { device.swipe(w / 2, h * 3 / 4, w / 2, h / 4, 20); SystemClock.sleep(300) }
+        shot("02b-permisos-final")
+        assertAlive("el asistente de permisos")
+        device.findObject(By.desc("Cerrar"))?.click()
+        SystemClock.sleep(500)
+        device.findObject(By.desc("Cerrar"))?.click()
+        SystemClock.sleep(500)
     }
 
     @Test
