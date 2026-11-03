@@ -189,17 +189,21 @@ object Sentido {
  * en el registro de GitHub Actions). Si Ultra saca fichas que no vienen al caso, subir FICHA.
  */
 object SentidoUmbrales {
+    // Medido en GitHub Actions con el modelo real: frases relacionadas con otras palabras dan 0,30-0,82
+    // ("médico/doctor" 0,82, "la tienda online/Nexo: app de ventas por internet" 0,44, "beber/café" 0,30)
+    // y frases sin relación dan entre -0,08 y 0,09.
+
     /** Parecido mínimo para pensar que una frase habla de una ficha sin nombrarla. */
-    const val FICHA = 0.45
+    const val FICHA = 0.28
 
     /** Y que la segunda ficha quede claramente por detrás (si no, mejor no adivinar). */
-    const val FICHA_MARGEN = 0.06
+    const val FICHA_MARGEN = 0.08
 
     /** "¿Recuerdas…?" contestado al instante por sentido: más exigente, porque no pasa por el modelo. */
-    const val FICHA_DIRECTA = 0.55
+    const val FICHA_DIRECTA = 0.33
 
     /** Por debajo de este parecido, dos frases no tienen nada que ver (sirve de cero al mezclar). */
-    const val SUELO = 0.25
+    const val SUELO = 0.0
 
     /** Mezcla el parecido por letras (trigramas) con el de sentido: se queda con el mejor de los dos. */
     fun mezcla(letras: Double, sentido: Double?): Double =

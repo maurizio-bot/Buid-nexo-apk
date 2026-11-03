@@ -183,7 +183,8 @@ class EmuladorTest {
         note("> sentido: coche/vehículo %.2f, coche/manzana %.2f\n".format(near, far))
         assertTrue(near > far)
         ask("nuevo proyecto Nexo: aplicación de ventas por internet para mi negocio")
-        ask("recuerdas la app de la tienda online")
+        val guess = ask("recuerdas la app de la tienda online")
+        assertTrue("Confundió la ficha por sentido: $guess", !guess.contains("Prueba Emulador"))
     }
 
     @Test

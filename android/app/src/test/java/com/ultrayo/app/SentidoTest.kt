@@ -74,6 +74,17 @@ class SentidoTest {
     }
 
     @Test
+    fun umbrales() {
+        assumeTrue("Sin modelo de sentido", model != null)
+        // Lo relacionado pasa el umbral de ficha; lo que no tiene nada que ver, no.
+        assertTrue(sim("la tienda online", "Nexo. aplicación de ventas por internet para mi negocio") >= SentidoUmbrales.FICHA)
+        assertTrue(sim("mi hermana", "Lucía. hermana de Maurizio, vive en Milán") >= SentidoUmbrales.FICHA)
+        assertTrue(sim("qué hora es", "Nexo. aplicación de ventas por internet para mi negocio") < SentidoUmbrales.FICHA)
+        assertTrue(sim("pon música relajante", "Casa verde. reforma del baño de la casa del pueblo") < SentidoUmbrales.FICHA)
+        assertTrue(sim("explícame qué es un agujero negro", "Lucía. hermana de Maurizio, vive en Milán") < SentidoUmbrales.FICHA)
+    }
+
+    @Test
     fun tokenizador() {
         assumeTrue("Sin modelo de sentido", model != null)
         val m = model!!
