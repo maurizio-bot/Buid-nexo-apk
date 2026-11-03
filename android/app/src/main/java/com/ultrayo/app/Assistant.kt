@@ -230,6 +230,27 @@ object Assistant {
         }
     }
 
+    /** Si [text] es "busca en internet X", devuelve X (para buscarlo por adelantado mientras habla). */
+    fun webQueryOf(text: String): String? =
+        webRequest.find(text.trim())?.groupValues?.drop(1)?.firstOrNull { it.isNotBlank() }?.trim()?.takeIf { it.length > 1 }
+
+    /**
+     * Deja el modelo preparado (instrucciones y conversación) mientras Maurizio aún habla, para que
+     * empiece a contestar antes. No cambia nada si ya estaba listo.
+     */
+    fun prewarm() {
+        val brain = Ai.brain ?: return
+        if (!brainDirty || thinking || loading || !::memory.isInitialized) return
+        brainDirty = false
+        val systemPrompt = memory.systemPrompt()
+        val history = turns.takeLast(MAX_HISTORY).toList()
+        scope.launch {
+            withContext(Ai.thread) {
+                runCatching { brain.reset(systemPrompt, history) }.onFailure { brainDirty = true }
+            }
+        }
+    }
+
     /** Un aviso corto para enseñar al terminar la respuesta (por ejemplo "Apuntado para la próxima vez"). */
     private var afterNote: String? = null
 
@@ -258,14 +279,20 @@ object Assistant {
         cutSpeech()
         listening = true
         status = "Te escucho…"
+        Anticipa.onListenStart(app)
         NeuralEar.listen(
-            onPartial = { status = "🎙 $it" },
+            onPartial = {
+                status = "🎙 $it"
+                Anticipa.onPartial(app, it)
+            },
             onHeard = { text ->
+                Anticipa.onEnd()
                 listening = false
                 status = ""
                 onHeard(text)
             },
             onNothing = {
+                Anticipa.onEnd()
                 listening = false
                 status = ""
                 onNothing()
@@ -762,7 +789,7 @@ object Assistant {
                 val query = match.groupValues.drop(1).firstOrNull { it.isNotBlank() }.orEmpty().trim()
                 if (query.length > 1) {
                     retrieveThenAsk(text, history, onDone, "Buscando y leyendo en internet…") {
-                        val pages = WebSearch.readTop(query, pages = 3)
+                        val pages = Anticipa.result(command) ?: WebSearch.readTop(query, pages = 3)
                         if (pages.isBlank()) null
                         else "Lo que dicen las mejores páginas sobre \"$query\":\n$pages\n\n" +
                             "Pregunta de Maurizio: $text\n\nContesta resumiendo lo que dicen estas páginas, sin inventar nada que no esté en " +
@@ -785,7 +812,7 @@ object Assistant {
                 thinking = true
                 status = "Mirándolo…"
                 scope.launch {
-                    val answer = runCatching { withContext(Dispatchers.IO) { work() } }
+                    val answer = runCatching { withContext(Dispatchers.IO) { Anticipa.result(command) ?: work() } }
                         .getOrElse { "No pude consultarlo (¿hay conexión a internet?): ${it.message}" }
                     thinking = false
                     say(answer, onDone)

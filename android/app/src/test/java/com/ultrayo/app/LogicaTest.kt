@@ -269,3 +269,14 @@ class BurbujaTest {
         assertNull(Burbuja.order("pon música"))
     }
 }
+
+class AnticipaTest {
+    @Test fun ordenesCortasCompletas() {
+        assertTrue(Anticipa.esOrdenCompleta("Qué hora es"))
+        assertTrue(Anticipa.esOrdenCompleta("sí"))
+        assertTrue(Anticipa.esOrdenCompleta("Ultra, para"))
+        assertFalse(Anticipa.esOrdenCompleta("qué hora es en Tokio"))
+        assertFalse(Anticipa.esOrdenCompleta("abre WhatsApp"))
+        assertFalse(Anticipa.esOrdenCompleta("sí pero cambia el texto"))
+    }
+}

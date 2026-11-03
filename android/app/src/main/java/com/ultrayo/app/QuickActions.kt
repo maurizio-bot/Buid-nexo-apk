@@ -474,9 +474,7 @@ object QuickActions {
 
     /** Busca una app instalada por su nombre, aunque se diga sin tildes o con otro nombre. */
     fun findApp(c: Context, said: String): Pair<String, String>? {
-        val pm = c.packageManager
-        val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-            .map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
+        val apps = apps(c)
         val wanted = norm(said).let { aliases[it] ?: it }
         if (wanted.length < 2) return null
         return apps.firstOrNull { norm(it.first) == wanted }
@@ -486,14 +484,27 @@ object QuickActions {
             ?: apps.firstOrNull { it.second.lowercase().contains(wanted.replace(" ", "")) }
     }
 
-    data class Contact(val name: String, val number: String)
+    @Volatile
+    private var appsCache: Pair<Long, List<Pair<String, String>>>? = null
 
-    /** Busca un contacto por su nombre, o usa el número si lo ha dicho. */
-    fun contact(c: Context, said: String): Contact? {
-        val digits = said.filter { it.isDigit() || it == '+' }
-        if (digits.count { it.isDigit() } >= 6) return Contact(said, international(c, digits))
-        if (!granted(c, Manifest.permission.READ_CONTACTS)) return null
-        val wanted = norm(said.removePrefix("mi ").removePrefix("a "))
+    @Volatile
+    private var contactsCache: Pair<Long, List<Contact>>? = null
+    private const val CACHE_MS = 120_000L
+
+    /** Las apps instaladas (nombre, paquete), guardadas a mano un par de minutos para no buscarlas cada vez. */
+    private fun apps(c: Context): List<Pair<String, String>> {
+        val now = System.currentTimeMillis()
+        appsCache?.let { (at, list) -> if (now - at < CACHE_MS) return list }
+        val pm = c.packageManager
+        val list = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+            .map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
+        appsCache = now to list
+        return list
+    }
+
+    private fun allContacts(c: Context): List<Contact> {
+        val now = System.currentTimeMillis()
+        contactsCache?.let { (at, list) -> if (now - at < CACHE_MS) return list }
         val found = mutableListOf<Contact>()
         c.contentResolver.query(
             ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
@@ -506,6 +517,25 @@ object QuickActions {
                 found += Contact(name, number)
             }
         }
+        contactsCache = now to found
+        return found
+    }
+
+    /** Mientras Maurizio habla: tener a mano apps y contactos para que la orden sea instantánea. */
+    fun warm(c: Context) {
+        apps(c)
+        if (granted(c, Manifest.permission.READ_CONTACTS)) allContacts(c)
+    }
+
+    data class Contact(val name: String, val number: String)
+
+    /** Busca un contacto por su nombre, o usa el número si lo ha dicho. */
+    fun contact(c: Context, said: String): Contact? {
+        val digits = said.filter { it.isDigit() || it == '+' }
+        if (digits.count { it.isDigit() } >= 6) return Contact(said, international(c, digits))
+        if (!granted(c, Manifest.permission.READ_CONTACTS)) return null
+        val wanted = norm(said.removePrefix("mi ").removePrefix("a "))
+        val found = allContacts(c)
         val best = found.firstOrNull { norm(it.name) == wanted }
             ?: found.firstOrNull { norm(it.name).split(" ").firstOrNull() == wanted }
             ?: found.firstOrNull { norm(it.name).startsWith(wanted) }

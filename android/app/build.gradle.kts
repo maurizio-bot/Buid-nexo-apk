@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 33
-        versionName = "0.25.0"
+        versionCode = 34
+        versionName = "0.26.0"
         // Pruebas automáticas en un emulador (GitHub Actions): ver android/scripts/prueba-emulador.sh
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
