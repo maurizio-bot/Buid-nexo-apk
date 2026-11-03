@@ -123,11 +123,11 @@ object NeuralVoice {
             if (engine == null || gen != generation) return@execute
             ErrorLog.begin("voz", "hablando con la voz rápida (sherpa-onnx Piper)")
             try {
-                engine.generateWithCallback(text, sid = 0, speed = speed) { samples ->
-                    if (gen != generation) return@generateWithCallback 0
+                engine.generateWithCallback(text, sid = 0, speed = speed, callback = TtsCallback { samples ->
+                    if (gen != generation) return@TtsCallback 0
                     playQueue.put(Chunk(gen, samples.copyOf()))
                     1
-                }
+                })
             } catch (e: Throwable) {
                 ErrorLog.add("Fallo de la voz rápida", e)
             } finally {
@@ -218,4 +218,16 @@ object NeuralVoice {
             if (offset < samples.size) Thread.sleep(8)
         }
     }
+}
+
+/**
+ * El trozo de código que la librería de voz (sherpa-onnx) llama por cada pedazo de audio.
+ *
+ * Tiene que ser una clase de verdad y no una lambda normal: la librería nativa busca a mano el método
+ * `invoke(float[]): Integer` en la clase del objeto. Kotlin 2 compila las lambdas de otra forma
+ * (invokedynamic) y esa clase solo tiene `invoke(Object): Object`, así que la librería no lo encontraba
+ * y la app se cerraba de golpe al hablar (NoSuchMethodError dentro de JNI → SIGABRT). Ver TtsCallbackTest.
+ */
+class TtsCallback(private val block: (FloatArray) -> Int) : (FloatArray) -> Int {
+    override fun invoke(samples: FloatArray): Int = block(samples)
 }
