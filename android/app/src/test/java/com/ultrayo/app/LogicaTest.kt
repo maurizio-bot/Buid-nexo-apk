@@ -241,3 +241,22 @@ class ReferenciasTest {
         assertFalse(Referencias.esDespedida("gracias, ahora pon música"))
     }
 }
+
+class VistaTest {
+
+    @Test fun queVea() {
+        assertEquals(Vista.Pedido.ESTO, Vista.pedido("Ultra, ¿qué es esto?"))
+        assertEquals(Vista.Pedido.LEER, Vista.pedido("resume lo que estoy leyendo"))
+        assertEquals(Vista.Pedido.LEER, Vista.pedido("tradúceme esto"))
+        assertEquals(Vista.Pedido.PANTALLA, Vista.pedido("qué ves en mi pantalla"))
+        assertEquals(Vista.Pedido.CAMARA, Vista.pedido("qué ves con la cámara"))
+        assertEquals(Vista.Pedido.CAMARA, Vista.pedido("qué es esto que enfoco"))
+    }
+
+    @Test fun noEsMirar() {
+        assertNull(Vista.pedido("abre la cámara"))
+        assertNull(Vista.pedido("lee la pantalla"))
+        assertNull(Vista.pedido("qué es un agujero negro"))
+        assertNull(Vista.pedido("resume la reunión de ayer"))
+    }
+}

@@ -130,6 +130,13 @@
             </intent-filter>
         </activity>
 
+        <!-- "¿Qué es esto?" con la cámara: abre la app de cámara y le pasa la foto a Ultra -->
+        <activity
+            android:name=".CameraActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <service
             android:name=".UltraService"
             android:exported="false"

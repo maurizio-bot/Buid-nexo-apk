@@ -4,15 +4,18 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.Display
 import android.view.Gravity
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -77,6 +80,49 @@ class UltraAccessibility : AccessibilityService() {
 
     /** La app que está delante ahora mismo (su paquete), o null si no se ve. */
     fun currentPackage(): String? = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+
+    /** Si lo que hay delante es la propia app de Ultra. */
+    fun ultraInFront(): Boolean = currentPackage() == packageName
+
+    /**
+     * Hace una captura de la pantalla (Android 11 o más) solo para que la mire el modelo dentro del
+     * teléfono, y la guarda reducida en la caché. [onDone] recibe la ruta, o null si no se pudo.
+     */
+    fun screenshot(onDone: (String?) -> Unit) {
+        if (Build.VERSION.SDK_INT < 30) return onDone(null)
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
+                override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                    val path = Safe.run("guardar la captura de pantalla") {
+                        val buffer = result.hardwareBuffer
+                        val hardware = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
+                        val soft = hardware?.copy(Bitmap.Config.ARGB_8888, false)
+                        hardware?.recycle()
+                        buffer.close()
+                        soft?.let { saveSmall(it) }
+                    }
+                    onDone(path)
+                }
+
+                override fun onFailure(errorCode: Int) = onDone(null)
+            })
+        } catch (e: Exception) {
+            ErrorLog.add("No pude hacer la captura para mirarla", e)
+            onDone(null)
+        }
+    }
+
+    private fun saveSmall(bitmap: Bitmap): String {
+        val scale = minOf(1f, 1280f / maxOf(bitmap.width, bitmap.height))
+        val small = if (scale < 1f) Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true) else bitmap
+        val dir = java.io.File(cacheDir, "pantalla").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val file = java.io.File(dir, "pantalla-${System.currentTimeMillis()}.jpg")
+        file.outputStream().use { small.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        if (small !== bitmap) small.recycle()
+        bitmap.recycle()
+        return file.path
+    }
 
     /** El texto que se ve en la pantalla, con los botones y campos marcados. */
     fun readScreen(maxChars: Int = 2500): String {

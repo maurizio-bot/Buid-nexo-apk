@@ -693,6 +693,11 @@ object Assistant {
                 say(listOf("De nada.", "Aquí estoy.", "Cuando quieras.").random(), onDone)
                 return
             }
+            // "¿Qué es esto?", "resume lo que estoy leyendo", "mira con la cámara": que vea.
+            Vista.pedido(command)?.let { pedido ->
+                lookAt(pedido, text, history, onDone)
+                return
+            }
             // "Mándaselo a Juan", "llámale", "ábrelo", "repítelo": lo de antes, sin repetir nombres.
             val previous = history.lastOrNull { it.role == "assistant" }?.content
             when (val ref = Referencias.resolver(command, previous)) {
@@ -1011,6 +1016,52 @@ object Assistant {
         }
     }
 
+
+    /** Mira la pantalla (texto y captura) o abre la cámara, y se lo pasa al modelo con la pregunta. */
+    private fun lookAt(pedido: Vista.Pedido, text: String, history: List<Turn>, onDone: (() -> Unit)?) {
+        val robot = UltraAccessibility.instance
+        val kind = if (pedido == Vista.Pedido.ESTO) {
+            if (robot != null && !robot.ultraInFront()) Vista.Pedido.PANTALLA else Vista.Pedido.CAMARA
+        } else {
+            pedido
+        }
+        if (kind == Vista.Pedido.CAMARA) {
+            if (locked()) return say("Desbloquea el teléfono y te abro la cámara.", onDone)
+            Vista.abrirCamara(app, text)
+            return say("Te abro la cámara: enfoca y haz la foto.", onDone)
+        }
+        if (robot == null) {
+            return say("Para ver tu pantalla necesito el control del teléfono: actívalo en Ajustes, en Control del teléfono.", onDone)
+        }
+        if (robot.ultraInFront()) {
+            return say("Ahora mismo en la pantalla estoy yo. Ve a la otra app y pídemelo diciendo «Ultra» o desde la burbuja.", onDone)
+        }
+        val screenText = robot.readScreen(maxChars = if (kind == Vista.Pedido.LEER) 3500 else 1200)
+        if (kind == Vista.Pedido.LEER) {
+            askModel(
+                text,
+                "Esto es lo que se lee ahora en la pantalla de Maurizio:\n$screenText\n\nPetición de Maurizio: $text\n\n" +
+                    "Contesta solo con lo que hay en la pantalla, sin inventar.",
+                null, history, onDone,
+            )
+            return
+        }
+        thinking = true
+        status = "Mirando tu pantalla…"
+        robot.screenshot { path ->
+            main.post {
+                thinking = false
+                val image = path?.takeIf { Ai.brain?.visionEnabled == true }
+                askModel(
+                    text,
+                    "Maurizio está mirando su pantalla y pregunta: $text\n\nTexto que se lee en la pantalla:\n$screenText\n\n" +
+                        (if (image != null) "Te paso también una captura de la pantalla. " else "") +
+                        "Contesta breve y concreto.",
+                    image, history, onDone,
+                )
+            }
+        }
+    }
 
     /**
      * Primero consigue datos ([fetch]: internet o sus documentos, fuera del hilo principal) y luego
