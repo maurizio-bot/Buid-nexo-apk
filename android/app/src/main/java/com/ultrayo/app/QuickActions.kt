@@ -66,11 +66,11 @@ object QuickActions {
     }
 
     /** Quita "Ultra", "oye", "por favor" y la puntuación del final. */
-    fun clean(said: String): String = said.trim()
+    fun clean(said: String): String = said.trim().trimStart('¿', '¡').trim()
         .replace(Regex("^(oye |hola |eh )?(ultra( yo)?)[,.]?\\s*", RegexOption.IGNORE_CASE), "")
         .replace(Regex("^(por favor|porfa)[,]?\\s*", RegexOption.IGNORE_CASE), "")
         .replace(Regex("[,]?\\s*(por favor|porfa)$", RegexOption.IGNORE_CASE), "")
-        .trim().trimEnd('.', '!', '?', '¡', '¿').trim()
+        .trim().trim('.', '!', '?', '¡', '¿').trim()
 
     // --- Al instante ---
 
