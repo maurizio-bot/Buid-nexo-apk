@@ -46,6 +46,13 @@ object NeuralWake {
     private var vad: Vad? = null
     private var thread: Thread? = null
 
+    /**
+     * El detector de voz guarda estado dentro de la librería nativa y no se puede usar desde dos hilos
+     * a la vez. Si al parar la escucha el hilo viejo tarda más de lo esperado (escribiendo una frase
+     * larga con la pantalla apagada), el nuevo espera aquí en vez de pisarle el detector.
+     */
+    private val vadLock = Any()
+
     @Volatile
     private var session = 0
 
@@ -101,8 +108,20 @@ object NeuralWake {
         if (t !== Thread.currentThread()) runCatching { t.join(1500) }
     }
 
-    @SuppressLint("MissingPermission")
     private fun run(mine: Int, onWake: (String) -> Unit, onFailed: () -> Unit) {
+        synchronized(vadLock) {
+            if (mine != session) return
+            ErrorLog.begin("palabra", "esperando la palabra \"Ultra\" (detector de voz sherpa-onnx)")
+            try {
+                listen(mine, onWake, onFailed)
+            } finally {
+                ErrorLog.end("palabra")
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun listen(mine: Int, onWake: (String) -> Unit, onFailed: () -> Unit) {
         val detector = vad ?: return main.post { if (mine == session) onFailed() }.let {}
         val minBuffer = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val record = try {

@@ -121,13 +121,17 @@ object NeuralVoice {
         generator.execute {
             val engine = tts
             if (engine == null || gen != generation) return@execute
+            ErrorLog.begin("voz", "hablando con la voz rápida (sherpa-onnx Piper)")
             try {
                 engine.generateWithCallback(text, sid = 0, speed = speed) { samples ->
                     if (gen != generation) return@generateWithCallback 0
                     playQueue.put(Chunk(gen, samples.copyOf()))
                     1
                 }
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
+                ErrorLog.add("Fallo de la voz rápida", e)
+            } finally {
+                ErrorLog.end("voz")
             }
             if (gen == generation) playQueue.put(End(gen, id)) else main.post { onDone?.invoke(id) }
         }
