@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit concreto que compilar y publicar (vacío = el último de la rama)"
+        required: false
+        default: ""
 
 jobs:
   apk:
@@ -16,6 +21,8 @@ jobs:
         working-directory: android
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -45,7 +52,7 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk ultra-yo.apk
           gh release create "v0.2.${{ github.run_number }}" ultra-yo.apk \
-            --target "${{ github.sha }}" \
+            --target "${{ inputs.commit || github.sha }}" \
             --title "Ultra Yo 0.2.${{ github.run_number }}" \
             --notes "Descarga ultra-yo.apk en el teléfono e instálalo." \
             $([ "${{ github.ref_name }}" = "main" ] || echo --prerelease)
@@ -60,6 +67,8 @@ jobs:
         working-directory: android
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
