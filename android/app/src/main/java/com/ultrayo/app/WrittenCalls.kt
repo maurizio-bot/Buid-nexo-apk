@@ -64,6 +64,11 @@ object WrittenCalls {
                 tools.proponerPersonalidad(personality)
                 "Te he dejado la nueva personalidad en la pantalla: pulsa Aplicar si te gusta."
             }
+            "proponerreglas" -> {
+                val rules = args["nuevasreglas"] ?: args["reglas"] ?: return null
+                tools.proponerReglas(rules)
+                "Te he dejado las nuevas reglas en la pantalla: pulsa Aplicar si te gustan."
+            }
             "guardardato" -> {
                 val value = args["texto"] ?: return null
                 DataTools(context).guardarDato(args["coleccion"] ?: "", value)
