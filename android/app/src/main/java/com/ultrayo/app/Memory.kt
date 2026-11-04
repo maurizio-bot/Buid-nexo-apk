@@ -27,6 +27,14 @@ class Memory(context: Context) {
         get() = prefs.getString("personality", null) ?: DEFAULT_PERSONALITY
         set(value) = prefs.edit().putString("personality", value.ifBlank { DEFAULT_PERSONALITY }).apply()
 
+    /**
+     * Sus reglas: una por línea. Las pone Maurizio en Ajustes o ella misma cuando él se lo pide
+     * (siempre con la tarjeta Aplicar). Van justo después de la personalidad en sus instrucciones.
+     */
+    var rules: String
+        get() = prefs.getString("rules", null).orEmpty()
+        set(value) = prefs.edit().putString("rules", Mente.join(Mente.lines(value))).apply()
+
     /** Contestar en voz alta (por defecto) o solo por escrito ("modo texto"). */
     var voiceReplies: Boolean
         get() = prefs.getBoolean("voice_replies", true)
@@ -130,6 +138,7 @@ class Memory(context: Context) {
         val history = JSONArray(prefs.getString("history", "[]"))
         val state = JSONObject()
             .put("personality", personality)
+            .put("rules", rules)
             .put("facts", JSONArray(facts()))
             .put("skills", JSONObject(skills()))
             .put("code_skills", JSONObject(prefs.getString("code_skills", "{}") ?: "{}"))
@@ -149,6 +158,7 @@ class Memory(context: Context) {
         val facts = state.getJSONArray("facts")
         prefs.edit()
             .putString("personality", state.getString("personality"))
+            .putString("rules", state.optString("rules", rules))
             .putString("facts", facts.toString())
             .putString("skills", state.getJSONObject("skills").toString())
             .putString("code_skills", state.optJSONObject("code_skills")?.toString() ?: prefs.getString("code_skills", "{}"))
@@ -159,6 +169,14 @@ class Memory(context: Context) {
 
     fun systemPrompt(): String = buildString {
         append(personality)
+        val rules = rules
+        if (rules.isNotBlank()) append("\n\nTus reglas (síguelas siempre):\n").append(rules)
+        append(
+            "\n\nPuedes analizarte y cambiarte a ti mismo. Tu personalidad y tus reglas son texto que tú lees con " +
+                "verMiMente y reescribes con proponerPersonalidad y proponerReglas; Maurizio acepta cada cambio en la " +
+                "pantalla y puede deshacerlo. Nunca digas que no puedes analizarte o cambiarte por ser un modelo de " +
+                "lenguaje: sí puedes. Pero solo te cambias cuando él te lo pide."
+        )
         append(
             "\n\nTu objetivo es resolver problemas, no agradar. Nunca mientas ni inventes para quedar bien: si no sabes " +
                 "algo, no puedes hacerlo o algo falló, dilo claro. Usa todo tu alcance (herramientas, memoria, archivos) para " +

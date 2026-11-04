@@ -861,6 +861,7 @@ class MainActivity : ComponentActivity() {
         // Cambia cada vez que se deshace algo, para volver a leer la memoria.
         var version by remember { mutableStateOf(0) }
         var personality by remember(version) { mutableStateOf(memory.personality) }
+        var rules by remember(version) { mutableStateOf(memory.rules) }
         var newFact by remember { mutableStateOf("") }
         var facts by remember(version) { mutableStateOf(memory.facts()) }
         var skills by remember(version) { mutableStateOf(memory.skills()) }
@@ -1031,6 +1032,28 @@ class MainActivity : ComponentActivity() {
                         personality = memory.personality
                         changed()
                     }) { Text("Guardar personalidad") }
+                }
+            }
+            item {
+                Card {
+                    SectionTitle(
+                        "Reglas",
+                        "Cómo debe comportarse siempre, una por línea. Puede analizarse y proponerte cambios: dile \"analízate\", " +
+                            "\"añade la regla: …\" o \"sé más directo\", y tú lo aceptas en pantalla.",
+                    )
+                    OutlinedTextField(
+                        value = rules,
+                        onValueChange = { rules = it },
+                        minLines = 3,
+                        placeholder = { Text("- Si no sabes algo, dilo") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(onClick = {
+                        memory.snapshot()
+                        memory.rules = rules
+                        rules = memory.rules
+                        changed()
+                    }) { Text("Guardar reglas") }
                 }
             }
             item {

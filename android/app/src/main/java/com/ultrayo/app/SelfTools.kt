@@ -30,7 +30,7 @@ object SelfEdits {
 }
 
 /**
- * Lo que la IA puede cambiar de sí misma: personalidad y habilidades.
+ * Lo que la IA puede cambiar de sí misma: personalidad, reglas y habilidades.
  * Nada se aplica sin que Maurizio lo acepte en la pantalla, y todo se puede deshacer.
  */
 class SelfTools(context: Context) : ToolSet {
@@ -43,6 +43,7 @@ class SelfTools(context: Context) : ToolSet {
         val memory = Memory(context)
         return buildString {
             append("PERSONALIDAD:\n").append(memory.personality)
+            append("\n\nREGLAS:\n").append(memory.rules.ifBlank { "(ninguna)" })
             append("\n\nHABILIDADES:\n")
             val skills = memory.skills()
             if (skills.isEmpty()) append("(ninguna)\n")
@@ -64,6 +65,14 @@ class SelfTools(context: Context) : ToolSet {
     ): String = propose(
         SelfChange("Reescribir mi personalidad", nuevaPersonalidad.trim()) { it.personality = nuevaPersonalidad.trim() }
     )
+
+    @Tool(description = "Propone reescribir tus reglas (cómo debes comportarte siempre). Maurizio debe aceptarlo.")
+    fun proponerReglas(
+        @ToolParam(description = "La lista completa de reglas nueva, una por línea empezando por \"- \"") nuevasReglas: String,
+    ): String {
+        val rules = Mente.join(Mente.lines(nuevasReglas))
+        return propose(SelfChange("Reescribir mis reglas", rules.ifBlank { "(sin reglas)" }) { it.rules = rules })
+    }
 
     @Tool(description = "Propone crear una habilidad nueva o reescribir una que ya tienes. Maurizio debe aceptarlo.")
     fun proponerHabilidad(

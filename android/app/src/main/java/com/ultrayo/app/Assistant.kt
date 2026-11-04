@@ -33,6 +33,9 @@ private const val RESET_TURN_CHARS = 600
 private fun forReset(history: List<Turn>): List<Turn> =
     history.takeLast(RESET_TURNS).map { if (it.content.length > RESET_TURN_CHARS) it.copy(content = it.content.take(RESET_TURN_CHARS) + "…") else it }
 
+/** Durante cuánto tiempo después de analizarse "aplica esos cambios" se refiere a ese análisis. */
+private const val ANALYSIS_WINDOW_MS = 15 * 60_000L
+
 /** Lo que el usuario adjunta antes de enviar: una foto ya copiada al teléfono o el texto de un archivo. */
 data class Attachment(val name: String, val imagePath: String? = null, val text: String? = null)
 
@@ -731,6 +734,11 @@ object Assistant {
                 say(listOf("De nada.", "Aquí estoy.", "Cuando quieras.").random(), onDone)
                 return
             }
+            // Sobre sí misma: "¿puedes analizarte?", "analízate", "sé más directo", "añade la regla: …".
+            Mente.entender(command, justAnalyzed = System.currentTimeMillis() - analyzedAt < ANALYSIS_WINDOW_MS)?.let { pedido ->
+                atenderMente(pedido, text, history, onDone)
+                return
+            }
             // "Hola", "¿cómo estás?": al instante, sin modelo, sin memoria y sin pensar.
             Charla.responder(command, history.lastOrNull { it.role == "assistant" }?.content)?.let { answer ->
                 say(answer, onDone)
@@ -1106,6 +1114,101 @@ object Assistant {
         }
     }
 
+
+    /** Cuándo se analizó por última vez: durante un rato, "aplica esos cambios" se refiere a ese análisis. */
+    private var analyzedAt = 0L
+
+    /** Analizarse, enseñar y cambiar su personalidad y sus reglas. Los cambios salen en la tarjeta Aplicar. */
+    private fun atenderMente(pedido: Mente.Pedido, text: String, history: List<Turn>, onDone: (() -> Unit)?) {
+        when (pedido) {
+            Mente.Pedido.Capacidad -> say(
+                "Sí. Mi personalidad y mis reglas son texto que puedo leer y reescribir. Dime \"analízate\" y te digo " +
+                    "qué haría mejor, o pídeme el cambio directamente, por ejemplo \"sé más directo\" o \"añade la regla: " +
+                    "…\". Cada cambio te lo enseño en pantalla y solo se aplica si pulsas Aplicar.",
+                onDone,
+            )
+            Mente.Pedido.Ver -> {
+                val rules = Mente.lines(memory.rules)
+                say(
+                    "Mi personalidad: " + memory.personality.replace(Regex("\\s*\n\\s*"), " ").trim() +
+                        if (rules.isEmpty()) " Reglas propias no tengo ninguna todavía." else " Mis reglas: " + rules.joinToString(". ") + ".",
+                    onDone,
+                )
+            }
+            Mente.Pedido.Analizar -> {
+                analyzedAt = System.currentTimeMillis()
+                askModel(text, Mente.analysisPrompt(memory.personality, memory.rules, text, recentErrors()), null, history, onDone)
+            }
+            Mente.Pedido.AplicarAnalisis -> {
+                analyzedAt = 0L
+                val analysis = history.lastOrNull { it.role == "assistant" }?.content.orEmpty()
+                rewriteMyself("Aplica los cambios que tú mismo propusiste al analizarte:\n$analysis", onDone)
+            }
+            is Mente.Pedido.Cambiar -> rewriteMyself(pedido.peticion, onDone)
+            is Mente.Pedido.NuevaRegla -> {
+                if (locked()) return say("Desbloquea el teléfono y te enseño la regla para que la aceptes.", onDone)
+                val rule = pedido.regla.trim().replaceFirstChar { it.uppercase() }
+                SelfEdits.propose(SelfChange("Añadir una regla", rule) { it.rules = Mente.join(Mente.lines(it.rules) + rule) })
+                say("Te dejo la regla en pantalla: pulsa Aplicar y la sigo desde ya.", onDone)
+            }
+            is Mente.Pedido.QuitarRegla -> {
+                val rule = Mente.findRule(memory.rules, pedido.regla)
+                    ?: return say("No tengo ninguna regla así. Dime \"cuáles son tus reglas\" y te las leo.", onDone)
+                if (locked()) return say("Desbloquea el teléfono y te enseño la regla para que confirmes que la quito.", onDone)
+                SelfEdits.propose(SelfChange("Quitar una regla", rule) { m -> m.rules = Mente.join(Mente.lines(m.rules).filterNot { it == rule }) })
+                say("Te enseño en pantalla la regla que quitaría: pulsa Aplicar si es esa.", onDone)
+            }
+        }
+    }
+
+    /** Las últimas cosas que fallaron (solo los títulos), para que se analice con datos. */
+    private fun recentErrors(): String = runCatching {
+        ErrorLog.read().lines().filter { it.startsWith("— ") }.takeLast(5).joinToString("\n") { it.substringAfter(" · ", it) }
+    }.getOrDefault("")
+
+    /** Reescribe su personalidad y sus reglas con el modelo y lo deja en la tarjeta Aplicar/No. */
+    private fun rewriteMyself(request: String, onDone: (() -> Unit)?) {
+        if (locked()) return say("Desbloquea el teléfono y te enseño el cambio para que lo aceptes.", onDone)
+        val brain = Ai.brain ?: return say("Todavía me estoy despertando. Pídemelo en un momento o cámbialo tú en Ajustes, en Personalidad.", onDone)
+        val personality = memory.personality.trim()
+        val rules = memory.rules
+        thinking = true
+        status = "Reescribiendo mi personalidad…"
+        scope.launch {
+            val reply = runCatching {
+                withContext(Ai.thread) { brain.answerOnce(Mente.rewriteInstruction(), Mente.rewriteInput(personality, rules, request)) }
+            }
+            // answerOnce cierra la conversación: la próxima pregunta la vuelve a abrir con las instrucciones nuevas.
+            brainDirty = true
+            thinking = false
+            status = ""
+            reply.fold(
+                onSuccess = { raw ->
+                    val parsed = Mente.parseRewrite(raw, rules)
+                    when {
+                        parsed == null -> say("No me salió bien la nueva versión. Pídemelo con otras palabras o cámbialo tú en Ajustes, en Personalidad.", onDone)
+                        parsed.first == personality && parsed.second == rules ->
+                            say("La versión que me sale es igual a la de ahora. Dime más concreto qué quieres que cambie.", onDone)
+                        else -> {
+                            val (newPersonality, newRules) = parsed
+                            val title = when {
+                                newPersonality == personality -> "Cambiar mis reglas"
+                                newRules == rules -> "Cambiar mi personalidad"
+                                else -> "Cambiar mi personalidad y mis reglas"
+                            }
+                            val detail = "PERSONALIDAD:\n$newPersonality\n\nREGLAS:\n" + newRules.ifBlank { "(ninguna)" }
+                            SelfEdits.propose(SelfChange(title, detail) { it.personality = newPersonality; it.rules = newRules })
+                            say("Te dejo en pantalla cómo quedaría. Léelo y pulsa Aplicar si te convence; si no, pulsa No.", onDone)
+                        }
+                    }
+                },
+                onFailure = {
+                    ErrorLog.add("Fallo al reescribir la personalidad", it)
+                    say("No pude reescribirme: ${Safe.describe(it)}.", onDone)
+                },
+            )
+        }
+    }
 
     /** Mira la pantalla (texto y captura) o abre la cámara, y se lo pasa al modelo con la pregunta. */
     private fun lookAt(pedido: Vista.Pedido, text: String, history: List<Turn>, onDone: (() -> Unit)?) {
