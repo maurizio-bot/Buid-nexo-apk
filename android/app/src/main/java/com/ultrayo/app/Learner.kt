@@ -17,7 +17,12 @@ import java.util.Locale
  */
 object Learner {
 
-    private const val IDLE_MS = 90_000L
+    /**
+     * Silencio antes de repasar la conversación. El repaso usa el modelo y cierra la conversación en curso,
+     * así que la siguiente pregunta tiene que volver a leer todas las instrucciones y herramientas (varios
+     * segundos). Con 90 s pasaba casi siempre entre pregunta y pregunta: ahora espera 10 minutos.
+     */
+    private const val IDLE_MS = 10 * 60_000L
     private const val MAX_TURNS = 14
 
     private val main = Handler(Looper.getMainLooper())

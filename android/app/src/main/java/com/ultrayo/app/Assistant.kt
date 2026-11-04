@@ -23,6 +23,16 @@ import java.util.Locale
 private const val MAX_HISTORY = 20
 private const val MAX_PROMPT = 6000
 
+/** Al empezar conversación con el modelo, solo lo último hablado y recortado: menos que leer, antes contesta. */
+private const val RESET_TURNS = 8
+
+/** A partir de cuánto tarda la primera palabra se apunta en el Registro de errores, para ver la causa. */
+private const val SLOW_MS = 6000L
+private const val RESET_TURN_CHARS = 600
+
+private fun forReset(history: List<Turn>): List<Turn> =
+    history.takeLast(RESET_TURNS).map { if (it.content.length > RESET_TURN_CHARS) it.copy(content = it.content.take(RESET_TURN_CHARS) + "…") else it }
+
 /** Lo que el usuario adjunta antes de enviar: una foto ya copiada al teléfono o el texto de un archivo. */
 data class Attachment(val name: String, val imagePath: String? = null, val text: String? = null)
 
@@ -247,7 +257,7 @@ object Assistant {
         val history = turns.takeLast(MAX_HISTORY).toList()
         scope.launch {
             withContext(Ai.thread) {
-                runCatching { brain.reset(systemPrompt, history) }.onFailure { brainDirty = true }
+                runCatching { brain.reset(systemPrompt, forReset(history)) }.onFailure { brainDirty = true }
             }
         }
     }
@@ -721,6 +731,11 @@ object Assistant {
                 say(listOf("De nada.", "Aquí estoy.", "Cuando quieras.").random(), onDone)
                 return
             }
+            // "Hola", "¿cómo estás?": al instante, sin modelo, sin memoria y sin pensar.
+            Charla.responder(command, history.lastOrNull { it.role == "assistant" }?.content)?.let { answer ->
+                say(answer, onDone)
+                return
+            }
             // Rutinas que él encarga: "cada mañana a las 8 dame un resumen", "avísame si me escribe Juan".
             Rutinas.atender(app, command) { summary -> notify(summary) }?.let { answer ->
                 say(answer, onDone)
@@ -982,7 +997,12 @@ object Assistant {
         }
 
         val hidden = Thinking.Filter()
+        // Para saber dónde se va el tiempo cuando tarda: esperar al modelo, leer instrucciones o escribir.
+        val askedAt = System.currentTimeMillis()
+        var startedAt = 0L
+        var firstAt = 0L
         val onChunk: (String) -> Unit = { raw ->
+            if (firstAt == 0L) firstAt = System.currentTimeMillis()
             main.post {
                 if (gen != generation) return@post
                 val delta = hidden.feed(raw)
@@ -1003,8 +1023,9 @@ object Assistant {
             var failure: String? = null
             val rawReply = try {
                 withContext(Ai.thread) {
+                    startedAt = System.currentTimeMillis()
                     try {
-                        if (reset) brain.reset(systemPrompt, history)
+                        if (reset) brain.reset(systemPrompt, forReset(history))
                         brain.askStreaming(prompt, image, onChunk).also { GpuGuard.answered(app) }
                     } catch (e: Exception) {
                         if (!Brain.isFull(e)) throw e
@@ -1051,6 +1072,16 @@ object Assistant {
                     afterNote?.let { status = it }
                     afterNote = null
                     if (failed == null && finalText.isNotBlank()) TrainingLog.add(app, text, finalText, "local")
+                    if (firstAt > 0 && firstAt - askedAt > SLOW_MS) {
+                        val s = { ms: Long -> String.format(java.util.Locale.ROOT, "%.1f s", ms / 1000.0) }
+                        ErrorLog.add(
+                            "Respuesta lenta a \"${text.take(60)}\": primera palabra a los ${s(firstAt - askedAt)} " +
+                                "(esperando a que el modelo quedara libre ${s((startedAt - askedAt).coerceAtLeast(0))}; " +
+                                (if (reset) "conversación nueva, volvió a leer instrucciones y herramientas" else "conversación seguida") +
+                                (if (deep) "; pensando a fondo" else "") + "; " + (if (brain.onGpu) "en la GPU" else "en el procesador") +
+                                "; total ${s(System.currentTimeMillis() - askedAt)})",
+                        )
+                    }
                     Learner.afterReply()
                     if (voice) {
                         if (written != null) {
