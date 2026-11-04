@@ -403,13 +403,27 @@ object GpuGuard {
 
     /** La app se cerró de golpe con el modelo en la GPU: la próxima vez, el procesador. */
     fun markBroken(context: Context) {
-        if (wanted(context)) prefs(context).edit().putString("gpu_estado", "rota").commit()
+        if (wanted(context)) prefs(context).edit().putString("gpu_estado", "rota").putString("gpu_motivo", "fallo").commit()
     }
 
-    /** Antes de cargar: decide si probar la GPU. Si la última vez se quedó a medias, la da por rota. */
+    /**
+     * Antes de cargar: decide si probar la GPU.
+     * Antes, si la app se cerraba con la GPU "probando" (deslizarla, que Android la cerrara en segundo
+     * plano, actualizarla) aunque no hubiera fallado nada, la daba por rota y el modelo se quedaba para
+     * siempre en el procesador, varias veces más lento. Desde Android 11 [ErrorLog.checkLastExit] sabe si
+     * fue un fallo de verdad y solo entonces la marca rota; en Android más viejo se sigue suponiendo.
+     * Una sola vez, las GPU marcadas rotas por ese error (sin fallo apuntado) se vuelven a probar.
+     */
     fun beforeLoad(context: Context): Boolean {
         val p = prefs(context)
-        if (p.getString("gpu_estado", null) == "probando") p.edit().putString("gpu_estado", "rota").commit()
+        if (p.getString("gpu_estado", null) == "probando" && android.os.Build.VERSION.SDK_INT < 30) {
+            p.edit().putString("gpu_estado", "rota").commit()
+        }
+        if (!p.getBoolean("gpu_revisada_0_29", false)) {
+            val e = p.edit().putBoolean("gpu_revisada_0_29", true)
+            if (p.getString("gpu_estado", null) == "rota" && p.getString("gpu_motivo", null) == null) e.putString("gpu_estado", "sin_probar")
+            e.commit()
+        }
         val use = wanted(context) && !broken(context)
         if (use) p.edit().putString("gpu_estado", "probando").commit()
         return use
@@ -417,7 +431,7 @@ object GpuGuard {
 
     /** Tras cargar: si cayó al procesador por un error normal, no lo vuelve a intentar. */
     fun afterLoad(context: Context, tried: Boolean, onGpu: Boolean) {
-        if (tried && !onGpu) prefs(context).edit().putString("gpu_estado", "rota").commit()
+        if (tried && !onGpu) prefs(context).edit().putString("gpu_estado", "rota").putString("gpu_motivo", "no_arranca").commit()
     }
 
     /** La primera respuesta en la GPU salió bien: ya es de fiar. */
