@@ -36,7 +36,7 @@ object Mente {
     private val capacidad = Regex(
         "\\b(?:puedes|podrias|eres capaz de|sabes|tienes capacidad de|es posible) (?:tu )?" +
             "(?:auto ?)?(?:analizar|evaluar|criticar|examinar|cambiar|modificar|mejorar|reprogramar|editar|reescribir|corregir|revisar|ajustar)" +
-            "(?:te(?: a ti mism[oa])?|(?: a)? ti mism[oa]| tu (?:propia |propio )?$SELF)\\b"
+            "(?:te(?: a ti mism[oa])?|(?: a)? ti mism[oa]| tus? (?:propia |propio |propias )?$SELF)\\b"
     )
     private val ver = Regex(
         "^(?:(?:muestrame|ensename|dime|lee(?:me)?|recitame|cuentame) (?:cual es |cuales son |como es |como son )?|" +
@@ -83,7 +83,7 @@ object Mente {
         if (t.isEmpty()) return null
         if (justAnalyzed && aplicar.matches(t)) return Pedido.AplicarAnalisis
         quitarRegla.find(t)?.let { return Pedido.QuitarRegla(it.groupValues[1].trim()) }
-        nuevaRegla.find(t)?.let { return Pedido.NuevaRegla(cut(original, t, it.groups[1]!!.range.first)) }
+        nuevaRegla.find(t)?.let { return Pedido.NuevaRegla(cut(original, t, it.groups[1]!!.range.first).replaceFirstChar { c -> c.uppercase() }) }
         desdeAhora.find(t)?.let { m ->
             // "a partir de ahora contesta por escrito" ya lo atiende el modo texto antes.
             return Pedido.NuevaRegla(cut(original, t, m.groups[1]!!.range.first).replaceFirstChar { it.uppercase() })
