@@ -16,6 +16,8 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -28,6 +30,9 @@ private const val RESET_TURNS = 8
 
 /** A partir de cuánto tarda la primera palabra se apunta en el Registro de errores, para ver la causa. */
 private const val SLOW_MS = 6000L
+
+/** Velocidad de la voz rápida. Con 1,08 iba algo atropellada y a veces no se entendía: ahora a ritmo normal. */
+private const val VOICE_SPEED = 1.0f
 private const val RESET_TURN_CHARS = 600
 
 private fun forReset(history: List<Turn>): List<Turn> =
@@ -123,6 +128,7 @@ object Assistant {
         if (::app.isInitialized) return
         app = context.applicationContext
         memory = Memory(app)
+        NeuralEar.longPauses = memory.longPauses
         WebCache.init(app)
         Learner.init(app)
         Control.init(app)
@@ -399,6 +405,11 @@ object Assistant {
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, app.packageName)
             // Reconocer dentro del teléfono si se puede (no espera a la red), salvo que ya haya fallado.
             if (!offlineFails && !retried) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            // Que no corte a la primera pausa (algunos reconocedores no lo respetan, pero no estorba).
+            if (memory.longPauses) {
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            }
         }
         r.startListening(intent)
     }
@@ -590,14 +601,14 @@ object Assistant {
 
     /** Pone [text] en la cola de la voz, sin cortar lo que ya está diciendo. */
     private fun speakPart(text: String) {
-        val spoken = text.replace(Regex("[*#_`>|]"), "").replace(Regex("https?://\\S+"), "el enlace").trim()
+        val spoken = Habla.limpiar(text)
         if (spoken.isEmpty() || !voiceReady()) return
         queued++
         speaking = true
         synchronized(spokenWords) { rememberSpoken(spoken) }
         val id = "g${generation}_${utteranceSeq++}"
         if (neuralVoiceOn()) {
-            NeuralVoice.speak(spoken, id, speed = 1.08f)
+            NeuralVoice.speak(spoken, id, speed = VOICE_SPEED)
         } else {
             if (queued == 1) tts?.setAudioAttributes(AudioRoute.speechAttributes())
             tts?.speak(spoken, TextToSpeech.QUEUE_ADD, null, id)
@@ -619,6 +630,24 @@ object Assistant {
     fun stopSpeaking() {
         bargeIn = null
         cutSpeech()
+        stopAnswer()
+    }
+
+    /** La respuesta del modelo en curso (para poder pararla al instante con PARAR). */
+    private var answerJob: Job? = null
+
+    /**
+     * Corta la respuesta que el modelo está escribiendo o pensando. Antes PARAR solo callaba la voz y el
+     * modelo seguía escribiendo por detrás (los puntos de "pensando" seguían y la siguiente pregunta
+     * esperaba a que acabara). [Brain.askStreaming] ve la cancelación en 0,15 s y para el motor sin cerrarlo.
+     */
+    private fun stopAnswer() {
+        val job = answerJob ?: return
+        answerJob = null
+        if (!job.isActive) return
+        job.cancel()
+        thinking = false
+        status = ""
     }
 
     /** Corta lo que está diciendo (por ejemplo, para empezar otra respuesta) sin terminar la conversación. */
@@ -1027,13 +1056,16 @@ object Assistant {
             }
         }
 
-        scope.launch {
+        // Una pregunta nueva sustituye a la anterior: el modelo deja la vieja en vez de terminarla.
+        answerJob?.cancel()
+        answerJob = scope.launch {
             var failure: String? = null
             val rawReply = try {
                 withContext(Ai.thread) {
                     startedAt = System.currentTimeMillis()
                     try {
-                        if (reset) brain.reset(systemPrompt, forReset(history))
+                        // Si una respuesta cortada dejó al modelo sin conversación, se empieza otra.
+                        if (reset || !brain.hasConversation) brain.reset(systemPrompt, forReset(history))
                         brain.askStreaming(prompt, image, onChunk).also { GpuGuard.answered(app) }
                     } catch (e: Exception) {
                         if (!Brain.isFull(e)) throw e
@@ -1042,6 +1074,10 @@ object Assistant {
                         brain.askStreaming(prompt.take(MAX_PROMPT), image, onChunk)
                     }
                 }
+            } catch (e: CancellationException) {
+                // PARAR o una pregunta nueva: no es un fallo. La conversación del modelo sigue valiendo
+                // (la voz y los puntos de "pensando" ya los quitó quien la paró).
+                throw e
             } catch (e: Throwable) {
                 brainDirty = true
                 if (!Brain.isFull(e)) ErrorLog.add("Fallo al contestar", e)
@@ -1086,7 +1122,9 @@ object Assistant {
                             "Respuesta lenta a \"${text.take(60)}\": primera palabra a los ${s(firstAt - askedAt)} " +
                                 "(esperando a que el modelo quedara libre ${s((startedAt - askedAt).coerceAtLeast(0))}; " +
                                 (if (reset) "conversación nueva, volvió a leer instrucciones y herramientas" else "conversación seguida") +
-                                (if (deep) "; pensando a fondo" else "") + "; " + (if (brain.onGpu) "en la GPU" else "en el procesador") +
+                                (if (deep) "; pensando a fondo" else "") +
+                                (if (brain.lastToolRounds > 0) "; antes usó herramientas ${brain.lastToolRounds} ${if (brain.lastToolRounds == 1) "vez" else "veces"}" else "") +
+                                "; " + (if (brain.onGpu) "en la GPU" else "en el procesador") +
                                 "; total ${s(System.currentTimeMillis() - askedAt)})",
                         )
                     }

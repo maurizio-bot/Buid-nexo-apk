@@ -142,7 +142,12 @@ object ErrorLog {
             ApplicationExitInfo.REASON_CRASH -> "fallo de la app (Java)"
             ApplicationExitInfo.REASON_CRASH_NATIVE -> "fallo nativo (motor del modelo o librería)"
             ApplicationExitInfo.REASON_ANR -> "se quedó colgada y Android la cerró"
-            ApplicationExitInfo.REASON_LOW_MEMORY -> "falta de memoria"
+            // No es un fallo de Ultra: Android cerró la app (con el modelo en memoria, varios GB) para dar
+            // memoria a otras, casi siempre con Ultra en segundo plano. Con "Ultra" escuchando (servicio en
+            // primer plano) Android la respeta mucho más.
+            ApplicationExitInfo.REASON_LOW_MEMORY -> "falta de memoria: Android la cerró para dar memoria a otras apps " +
+                (if (info.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE) "aunque estaba en uso" else "porque estaba en segundo plano") +
+                " (no es un fallo de Ultra; con la palabra «Ultra» activada la respeta más)"
             ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "usó demasiados recursos"
             ApplicationExitInfo.REASON_SIGNALED -> "señal del sistema ${info.status}"
             else -> return null // cerrada por Maurizio, actualizada, etc.: no es un fallo

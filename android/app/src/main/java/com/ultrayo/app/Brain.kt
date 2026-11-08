@@ -9,6 +9,7 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolCall
 import com.google.ai.edge.litertlm.ToolManager
 import com.google.ai.edge.litertlm.ToolSet
@@ -44,7 +45,12 @@ class Brain(
 ) {
 
     private var engine: Engine? = null
+
+    @Volatile
     private var conversation: Conversation? = null
+
+    /** Hay una conversación abierta (una respuesta cortada que el motor no soltó la deja en null). */
+    val hasConversation get() = conversation != null
 
     /** Nadie toca el motor mientras otro lo está usando (ni desde otro hilo por despiste). */
     private val lock = ReentrantLock()
@@ -59,6 +65,16 @@ class Brain(
      */
     private val toolManager = ToolManager(tools.map { tool(it) })
     private val gson = Gson()
+
+    /** Los nombres de las herramientas tal como las registra el motor (el nombre de cada función con @Tool). */
+    private val toolNames: List<String> = runCatching {
+        tools.flatMap { set -> set.javaClass.methods.filter { it.isAnnotationPresent(Tool::class.java) }.map { it.name } }
+    }.getOrDefault(emptyList()).distinct().sorted()
+
+    /** Cuántas veces usó herramientas en la última respuesta (para el registro de respuestas lentas). */
+    @Volatile
+    var lastToolRounds = 0
+        private set
 
     /**
      * Carga el modelo. Con [useGpu] lo intenta primero en la GPU, que empieza a contestar
@@ -196,6 +212,7 @@ class Brain(
             val conversation = checkNotNull(conversation) { "No hay conversación" }
             var message = firstMessage(text, imagePath)
             val full = StringBuilder()
+            lastToolRounds = 0
             repeat(MAX_TOOL_ROUNDS) {
                 val calls = mutableListOf<ToolCall>()
                 val round = StringBuilder()
@@ -213,6 +230,7 @@ class Brain(
                     }
                 }
                 if (calls.isEmpty()) return@withLock full.toString().trim()
+                lastToolRounds++
                 message = runTools(calls)
             }
             full.toString().trim().ifBlank { "Hice demasiadas consultas seguidas sin llegar a una respuesta." }
@@ -298,8 +316,29 @@ class Brain(
             ErrorLog.step("herramienta ${call.name} ${call.arguments}".take(300))
             val result = try {
                 val args = gson.toJsonTree(call.arguments).asJsonObject
-                plain(toolManager.execute(call.name, args)).also {
-                    if (it.startsWith("Error occured")) ErrorLog.add("Herramienta ${call.name} falló: $it".take(1500))
+                // El modelo a veces escribe mal el nombre ("vermi_mente" por verMiMente): se busca la de verdad.
+                // (Si no se pudieron leer los nombres, se usa el que dio el modelo tal cual, como antes.)
+                val name = if (toolNames.isEmpty()) call.name else ToolNames.resolve(call.name, toolNames)
+                if (name == null) {
+                    ErrorLog.add("El modelo pidió una herramienta que no existe: ${call.name}")
+                    "No existe ninguna herramienta llamada ${call.name}. Contesta sin ella o usa una de estas: " +
+                        toolNames.take(60).joinToString(", ")
+                } else {
+                    // Por si el motor la registra con otra forma del nombre (ver_mi_mente), se prueban las dos.
+                    var out = ""
+                    val candidates = listOf(name, call.name, ToolNames.snake(name)).distinct()
+                    for ((i, candidate) in candidates.withIndex()) {
+                        out = try {
+                            plain(toolManager.execute(candidate, args))
+                        } catch (e: IllegalArgumentException) {
+                            if (i == candidates.lastIndex || e.message?.contains("Tool not found") != true) throw e
+                            "Tool not found"
+                        }
+                        if (!out.contains("Tool not found")) break
+                    }
+                    out.also {
+                        if (it.startsWith("Error occured")) ErrorLog.add("Herramienta $name falló: $it".take(1500))
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -438,5 +477,43 @@ object GpuGuard {
     fun answered(context: Context) {
         val p = prefs(context)
         if (p.getString("gpu_estado", null) == "probando") p.edit().putString("gpu_estado", "ok").commit()
+    }
+}
+
+/**
+ * Encuentra la herramienta que quería el modelo aunque escriba mal el nombre: Gemma a veces lo pasa a
+ * minúsculas con guiones bajos ("vermi_mente", "ver_mi_mente") en vez de verMiMente, y el motor
+ * respondía "Tool not found". Se compara sin mayúsculas, guiones ni acentos y, si no, con una letra de diferencia.
+ */
+object ToolNames {
+    fun resolve(asked: String, known: List<String>): String? {
+        if (asked in known) return asked
+        val key = norm(asked)
+        if (key.isEmpty()) return null
+        known.firstOrNull { norm(it) == key }?.let { return it }
+        val close = known.filter { levenshtein(norm(it), key) <= if (key.length >= 8) 2 else 1 }
+        return close.singleOrNull()
+    }
+
+    /** verMiMente → ver_mi_mente. */
+    fun snake(name: String): String = name.replace(Regex("([a-z0-9])([A-Z])"), "$1_$2").lowercase()
+
+    private fun norm(name: String): String =
+        java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD)
+            .lowercase()
+            .filter { it in 'a'..'z' || it in '0'..'9' }
+
+    private fun levenshtein(a: String, b: String): Int {
+        if (kotlin.math.abs(a.length - b.length) > 2) return 99
+        var prev = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val cur = IntArray(b.length + 1)
+            cur[0] = i
+            for (j in 1..b.length) {
+                cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+            }
+            prev = cur
+        }
+        return prev[b.length]
     }
 }

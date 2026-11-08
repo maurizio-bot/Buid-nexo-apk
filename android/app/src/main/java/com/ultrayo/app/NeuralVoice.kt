@@ -65,6 +65,10 @@ object NeuralVoice {
                         model = model.path,
                         tokens = tokens.path,
                         dataDir = espeak.path,
+                        // Menos "ruido" que los valores de fábrica (0,667 y 0,8): pronuncia más estable y
+                        // se entiende mejor, a cambio de sonar un poco menos expresiva.
+                        noiseScale = 0.5f,
+                        noiseScaleW = 0.6f,
                     ),
                     numThreads = 2,
                     provider = "cpu",
@@ -230,4 +234,53 @@ object NeuralVoice {
  */
 class TtsCallback(private val block: (FloatArray) -> Int) : (FloatArray) -> Int {
     override fun invoke(samples: FloatArray): Int = block(samples)
+}
+
+/**
+ * Deja el texto listo para decirlo en voz alta. La voz (espeak + Piper) leía mal los símbolos, los
+ * emojis y las abreviaturas, y eso sonaba a ruido o a palabras que no se entendían.
+ */
+object Habla {
+    private val emoji = Regex("[\\x{1F000}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\x{FE0F}\\x{200D}]")
+    private val replacements = listOf(
+        // Las viñetas de las listas, antes que los guiones sueltos.
+        Regex("^\\s*[-•·]\\s+", RegexOption.MULTILINE) to "",
+        Regex("^\\s*\\d+[.)]\\s+", RegexOption.MULTILINE) to "",
+        Regex("(\\d)\\s*%") to "$1 por ciento",
+        Regex("(\\d)\\s*€") to "$1 euros",
+        Regex("€\\s*(\\d+(?:[.,]\\d+)?)") to "$1 euros",
+        Regex("\\$\\s*(\\d+(?:[.,]\\d+)?)") to "$1 dólares",
+        Regex("(\\d)\\s*km/h\\b") to "$1 kilómetros por hora",
+        Regex("(\\d)\\s*km\\b") to "$1 kilómetros",
+        Regex("(\\d)\\s*kg\\b") to "$1 kilos",
+        Regex("(\\d)\\s*cm\\b") to "$1 centímetros",
+        Regex("(\\d)\\s*ml\\b") to "$1 mililitros",
+        Regex("(\\d)\\s*GB\\b") to "$1 gigas",
+        Regex("(\\d)\\s*MB\\b") to "$1 megas",
+        Regex("(\\d)\\s*[º°]C\\b") to "$1 grados",
+        Regex("(\\d)\\s*[º°]") to "$1 grados",
+        Regex("\\bp\\. ?ej\\.", RegexOption.IGNORE_CASE) to "por ejemplo",
+        Regex("\\betc\\.", RegexOption.IGNORE_CASE) to "etcétera",
+        Regex("\\bnº\\s*", RegexOption.IGNORE_CASE) to "número ",
+        Regex("\\s&\\s") to " y ",
+        Regex("(\\d)\\s*\\+\\s*(\\d)") to "$1 más $2",
+        Regex("(\\d)\\s*=\\s*(\\d)") to "$1 igual a $2",
+        Regex("(\\d)\\s*[x×]\\s*(\\d)") to "$1 por $2",
+        Regex("\\s*(→|->|=>)\\s*") to ", ",
+        Regex("\\s+[-–—]\\s+") to ", ",
+        Regex("[()\\[\\]{}\"«»“”]") to " ",
+        Regex("\\b(\\d{1,2})/(\\d{1,2})/(\\d{2,4})\\b") to "$1 del $2 de $3",
+        Regex("(?<=\\p{L})\\s*/\\s*(?=\\p{L})") to " o ",
+        Regex("[*#_`>|~^]") to "",
+        Regex("https?://\\S+") to "el enlace",
+    )
+
+    fun limpiar(text: String): String {
+        var t = text.replace(emoji, "")
+        // Los enlaces primero, para que sus barras no se lean como "o".
+        t = t.replace(Regex("https?://\\S+"), "el enlace")
+        for ((regex, value) in replacements) t = t.replace(regex, value)
+        return t.replace(Regex("\\s*\\n+\\s*"), ". ").replace(Regex("\\s{2,}"), " ")
+            .replace(Regex("\\s+([,.;:!?])"), "$1").replace(Regex("([,.]){2,}"), "$1").trim()
+    }
 }

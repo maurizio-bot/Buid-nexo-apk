@@ -57,6 +57,10 @@ object NeuralEar {
     var active = false
         private set
 
+    /** Dejar pausas largas al hablar (Ajustes > Voz rápida): espera más antes de dar la frase por terminada. */
+    @Volatile
+    var longPauses = true
+
     /** Carga el modelo (un segundo o dos). Se llama fuera del hilo principal. */
     @Synchronized
     fun load(context: Context) {
@@ -85,10 +89,11 @@ object NeuralEar {
                 endpointConfig = EndpointConfig(
                     // Sin decir nada: se rinde a los 6 s.
                     rule1 = EndpointRule(false, 6.0f, 0.0f),
-                    // Tras hablar: 0,7 s de silencio basta para saber que has terminado.
-                    rule2 = EndpointRule(true, 0.7f, 0.0f),
-                    // Una frase muy larga se corta a los 30 s.
-                    rule3 = EndpointRule(false, 0.0f, 30.0f),
+                    // Tras hablar: 1 s de silencio es lo mínimo para pensar que has terminado (con 0,7 s
+                    // cortaba a Maurizio a media frase). Encima, [run] espera algo más según [longPauses].
+                    rule2 = EndpointRule(true, 1.0f, 0.0f),
+                    // Una frase muy larga se corta a los 60 s.
+                    rule3 = EndpointRule(false, 0.0f, 60.0f),
                 ),
                 enableEndpoint = true,
                 decodingMethod = "greedy_search",
@@ -226,6 +231,8 @@ object NeuralEar {
         val pcm = ShortArray(CHUNK)
         val samples = FloatArray(CHUNK)
         var last = ""
+        // Cuándo empezó el silencio que el reconocedor da por final de frase (0 = sigue hablando).
+        var silenceSince = 0L
         var interrupted = !whileSpeaking
         active = true
         try {
@@ -259,9 +266,19 @@ object NeuralEar {
                 }
                 if (interrupted && text != last && text.isNotEmpty()) {
                     last = text
+                    silenceSince = 0L
                     if (mine == session) main.post { onPartial(tidy(text)) }
                 }
-                if (interrupted && (endpoint || finishNow)) {
+                // El reconocedor cree que has terminado: se espera un poco más si la frase parece a medias
+                // ("y…", "que…", "pero…") o si Maurizio quiere pausas largas. Si vuelves a hablar, sigue.
+                var done = endpoint
+                if (!endpoint) silenceSince = 0L
+                if (interrupted && endpoint && !finishNow && text.isNotEmpty()) {
+                    val now = System.currentTimeMillis()
+                    if (silenceSince == 0L) silenceSince = now
+                    done = now - silenceSince >= Pausas.extraWaitMs(text, longPauses)
+                }
+                if (interrupted && (done || finishNow)) {
                     if (mine == session) {
                         session++
                         val heard = tidy(text)
@@ -287,4 +304,22 @@ object NeuralEar {
         val t = text.trim().replace(Regex("\\s+"), " ")
         return t.replaceFirstChar { it.uppercase() }
     }
+}
+
+/** Cuánto esperar a que Maurizio termine de hablar (sin Android, para poder probarlo en el PC). */
+object Pausas {
+    /** Lo que se espera de más tras el silencio de [rule2] antes de dar la frase por terminada. */
+    fun extraWaitMs(text: String, longPauses: Boolean): Long {
+        var wait = if (longPauses) 700L else 0L
+        if (looksUnfinished(text)) wait += 1300L
+        return wait
+    }
+
+    private val unfinishedEnd = Regex(
+        "\\b(y|e|o|u|ni|que|pero|porque|pues|aunque|si|cuando|como|donde|para|por|con|sin|de|del|a|al|en|el|la|los|las|un|una|unos|unas|mi|mis|tu|tus|su|sus|este|esta|ese|esa|lo|le|me|te|se|nos|mas|más|muy|también|tambien|entonces|o sea|es decir|bueno|eh|em|mm)$",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** La frase acaba en una palabra que pide continuación ("quiero que…", "y luego…"). */
+    fun looksUnfinished(text: String): Boolean = unfinishedEnd.containsMatchIn(text.trim().trimEnd('.', ',', ' '))
 }

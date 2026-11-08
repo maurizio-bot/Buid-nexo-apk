@@ -1201,6 +1201,7 @@ class MainActivity : ComponentActivity() {
     private fun FastVoiceSettings() {
         var fast by remember { mutableStateOf(memory.fastVoice) }
         var bargeIn by remember { mutableStateOf(memory.bargeIn) }
+        var longPauses by remember { mutableStateOf(memory.longPauses) }
         val ready = Assistant.fastVoiceReady
         val progress = VoiceModels.progress
         val downloading = VoiceModels.downloading
@@ -1240,6 +1241,14 @@ class MainActivity : ComponentActivity() {
         ) {
             memory.bargeIn = it
             bargeIn = it
+        }
+        SettingSwitch(
+            "Dejarme pausas al hablar",
+            "Espera un poco más antes de dar tu frase por terminada, para que puedas pensar mientras hablas. Apágalo si prefieres que conteste antes.",
+            longPauses,
+        ) {
+            memory.longPauses = it
+            longPauses = it
         }
         if (ready) {
             TextButton(onClick = { Assistant.say("Hola, Maurizio. Así sueno ahora, sin internet.") }) { Text("Probar la voz") }
