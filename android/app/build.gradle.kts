@@ -97,7 +97,7 @@ dependencies {
     // Zip con contraseña (también AES), RAR4 (también con contraseña) y RAR5 (libarchive nativo)
     implementation("net.lingala.zip4j:zip4j:2.11.6")
     implementation("com.github.junrar:junrar:8.1.2")
-    implementation("me.zhanghai.android.libarchive:library:1.1.7")
+    implementation("me.zhanghai.android.libarchive:library:1.1.6")
     // Decompilar el código (dex) de una APK a Java, dentro del teléfono. Sin lo que solo sirve
     // para escribir smali o para la línea de órdenes de jadx.
     implementation("io.github.skylot:jadx-core:1.5.6")
