@@ -929,6 +929,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             item { PainterCard() }
+            item { DiagCard() }
             item { ErrorLogCard() }
             if (canUndo) {
                 item {
@@ -1201,6 +1202,7 @@ class MainActivity : ComponentActivity() {
     private fun FastVoiceSettings() {
         var fast by remember { mutableStateOf(memory.fastVoice) }
         var bargeIn by remember { mutableStateOf(memory.bargeIn) }
+        var longPauses by remember { mutableStateOf(memory.longPauses) }
         val ready = Assistant.fastVoiceReady
         val progress = VoiceModels.progress
         val downloading = VoiceModels.downloading
@@ -1240,6 +1242,14 @@ class MainActivity : ComponentActivity() {
         ) {
             memory.bargeIn = it
             bargeIn = it
+        }
+        SettingSwitch(
+            "Dejarme pausas al hablar",
+            "Espera un poco más antes de dar tu frase por terminada, para que puedas pensar mientras hablas. Apágalo si prefieres que conteste antes.",
+            longPauses,
+        ) {
+            memory.longPauses = it
+            longPauses = it
         }
         if (ready) {
             TextButton(onClick = { Assistant.say("Hola, Maurizio. Así sueno ahora, sin internet.") }) { Text("Probar la voz") }
@@ -1369,6 +1379,57 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick = { editing = null }) { Text("Cancelar") }
                 }
             }
+        }
+    }
+
+    /**
+     * Diagnóstico: todo lo que ha hecho Ultra en los últimos 10 minutos (oír, decidir, el modelo, herramientas,
+     * voz, PARAR), con la hora al milisegundo, para copiarlo y pegárselo a Claude.
+     */
+    @Composable
+    private fun DiagCard() {
+        val clipboard = LocalClipboardManager.current
+        var count by remember { mutableStateOf(0) }
+        var open by remember { mutableStateOf(false) }
+        var shown by remember { mutableStateOf("") }
+        var copied by remember { mutableStateOf(false) }
+        LaunchedEffect(open) {
+            // Se lee del archivo fuera del hilo de la pantalla.
+            while (true) {
+                val text = withContext(Dispatchers.IO) { Diag.text() }
+                count = text.count { it == '\n' }.let { if (it > 0) it - 1 else 0 }
+                if (open) shown = text
+                delay(2000)
+            }
+        }
+        Card {
+            SectionTitle(
+                "Diagnóstico",
+                "Todo lo que ha hecho Ultra en los últimos 10 minutos, paso a paso y con la hora exacta. Se guarda " +
+                    "en un archivo al momento: si la app se cierra, al abrirla sigue aquí. Cópialo y pégaselo a Claude.",
+            )
+            Text("$count pasos apuntados.", color = UltraColors.Muted, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                GlowButton(if (copied) "Copiado" else "Copiar", onClick = {
+                    val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
+                    clipboard.setText(
+                        AnnotatedString(
+                            "Diagnóstico de Ultra Yo $version · ${android.os.Build.MODEL} · últimos 10 min\n" +
+                                "Voz rápida: ${if (memory.fastVoice) "sí" else "no"} · Interrumpirla hablando: ${if (memory.bargeIn) "sí" else "no"} · " +
+                                "Pausas largas: ${if (memory.longPauses) "sí" else "no"} · Modelo: ${Assistant.brainModel?.label ?: "sin cargar"}" +
+                                " en ${if (Ai.brain?.onGpu == true) "GPU" else "procesador"}\n" + Diag.text(),
+                        ),
+                    )
+                    copied = true
+                })
+                TextButton(onClick = { open = !open }) { Text(if (open) "Ocultar" else "Ver") }
+                TextButton(onClick = {
+                    Diag.clear()
+                    count = 0
+                    shown = ""
+                }) { Text("Borrar") }
+            }
+            if (open) Text(shown.takeLast(6000).ifBlank { "Aún no hay nada apuntado." }, color = UltraColors.Muted, fontSize = 11.sp)
         }
     }
 

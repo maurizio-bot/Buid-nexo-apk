@@ -35,6 +35,7 @@ object ErrorLog {
 
     /** Apunta un error. Nunca lanza nada. */
     fun add(what: String, error: Throwable? = null) {
+        Diag.log("error", what + (error?.let { " · ${it.javaClass.simpleName}: ${it.message}" } ?: ""))
         runCatching {
             val f = file() ?: return
             val entry = buildString {
@@ -57,7 +58,11 @@ object ErrorLog {
      * Se escribe en disco antes de hacerlo; si la app se cierra de golpe, al volver se sabe qué era.
      * Varias cosas pueden estar en marcha a la vez (por ejemplo el oído de la palabra "Ultra" y el modelo).
      */
+    private val startedAt = HashMap<String, Long>()
+
     fun begin(key: String, what: String) {
+        Diag.log(key, "empieza: $what")
+        synchronized(startedAt) { startedAt[key] = System.currentTimeMillis() }
         runCatching {
             synchronized(running) {
                 running[key] = DATE.format(Date()) + " · " + what
@@ -68,6 +73,8 @@ object ErrorLog {
 
     /** Lo que estaba en marcha con esa clave terminó (bien o con un error ya apuntado). */
     fun end(key: String) {
+        val start = synchronized(startedAt) { startedAt.remove(key) }
+        if (start != null) Diag.log(key, "termina (${System.currentTimeMillis() - start} ms)")
         runCatching {
             synchronized(running) {
                 if (running.remove(key) != null) saveRunning()
@@ -142,7 +149,12 @@ object ErrorLog {
             ApplicationExitInfo.REASON_CRASH -> "fallo de la app (Java)"
             ApplicationExitInfo.REASON_CRASH_NATIVE -> "fallo nativo (motor del modelo o librería)"
             ApplicationExitInfo.REASON_ANR -> "se quedó colgada y Android la cerró"
-            ApplicationExitInfo.REASON_LOW_MEMORY -> "falta de memoria"
+            // No es un fallo de Ultra: Android cerró la app (con el modelo en memoria, varios GB) para dar
+            // memoria a otras, casi siempre con Ultra en segundo plano. Con "Ultra" escuchando (servicio en
+            // primer plano) Android la respeta mucho más.
+            ApplicationExitInfo.REASON_LOW_MEMORY -> "falta de memoria: Android la cerró para dar memoria a otras apps " +
+                (if (info.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE) "aunque estaba en uso" else "porque estaba en segundo plano") +
+                " (no es un fallo de Ultra; con la palabra «Ultra» activada la respeta más)"
             ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "usó demasiados recursos"
             ApplicationExitInfo.REASON_SIGNALED -> "señal del sistema ${info.status}"
             else -> return null // cerrada por Maurizio, actualizada, etc.: no es un fallo

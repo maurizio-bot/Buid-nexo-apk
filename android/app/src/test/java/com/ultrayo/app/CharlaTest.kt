@@ -10,7 +10,7 @@ class CharlaTest {
 
     @Test fun saludosYComoEstas() {
         for (s in listOf("hola", "Hola!", "¡Hola, Ultra!", "buenos días", "Buenas", "¿Cómo estás?", "hola qué tal", "oye ultra, ¿y tú qué tal?",
-            "¿estás ahí?", "¿quién eres?", "hola, ¿cómo estás?", "Ultra, buenas noches")) {
+            "¿estás ahí?", "¿quién eres?", "hola, ¿cómo estás?", "Ultra, buenas noches", "Ahora mira, cómo estás")) {
             assertNotNull(s, Charla.responder(s, hour = 10))
         }
     }

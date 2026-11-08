@@ -50,6 +50,14 @@ class Memory(context: Context) {
         get() = prefs.getBoolean("barge_in", true)
         set(value) = prefs.edit().putBoolean("barge_in", value).apply()
 
+    /** Esperar más antes de dar por terminada una frase dicha (para poder pensar en voz alta). */
+    var longPauses: Boolean
+        get() = prefs.getBoolean("long_pauses", true)
+        set(value) {
+            prefs.edit().putBoolean("long_pauses", value).apply()
+            NeuralEar.longPauses = value
+        }
+
     /** Después de contestar, seguir escuchando unos segundos para no tener que decir "Ultra" otra vez. */
     var followUp: Boolean
         get() = prefs.getBoolean("follow_up", true)

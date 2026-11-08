@@ -10,6 +10,8 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         ErrorLog.init(this)
+        Diag.init(filesDir)
+        Diag.log("app", "se abre Ultra Yo ${BuildConfigInfo.version(this)}")
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             ErrorLog.add("La app se cerró por un fallo (hilo ${thread.name})", error)
