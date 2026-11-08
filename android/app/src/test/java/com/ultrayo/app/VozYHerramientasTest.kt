@@ -114,3 +114,20 @@ class EchoGateTest {
         assertTrue(gate.feed(0.1f, 0f))
     }
 }
+
+/** Ajustes > Diagnóstico: solo los últimos 10 minutos (0.33.0). */
+class DiagTest {
+
+    @Test fun guardaSoloLosUltimosDiezMinutos() {
+        Diag.clear()
+        val t0 = 1_000_000_000L
+        Diag.log("oído", "frase vieja", now = t0)
+        Diag.log("modelo", "algo reciente", now = t0 + Diag.WINDOW_MS - 1000)
+        val text = Diag.text(now = t0 + Diag.WINDOW_MS + 500)
+        assertFalse(text.contains("frase vieja"))
+        assertTrue(text.contains("[modelo] algo reciente"))
+        assertEquals(1, Diag.size(now = t0 + Diag.WINDOW_MS + 500))
+        Diag.clear()
+        assertEquals("", Diag.text())
+    }
+}

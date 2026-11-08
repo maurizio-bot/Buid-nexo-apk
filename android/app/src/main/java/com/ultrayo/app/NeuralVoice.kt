@@ -125,7 +125,7 @@ object NeuralVoice {
         generator.execute {
             val engine = tts
             if (engine == null || gen != generation) return@execute
-            ErrorLog.begin("voz", "hablando con la voz rápida (sherpa-onnx Piper)")
+            ErrorLog.begin("voz", "hablando con la voz rápida (sherpa-onnx Piper): \"${text.take(80)}\"")
             try {
                 engine.generateWithCallback(text, sid = 0, speed = speed, callback = TtsCallback { samples ->
                     if (gen != generation) return@TtsCallback 0

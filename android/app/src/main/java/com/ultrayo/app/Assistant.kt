@@ -486,6 +486,7 @@ object Assistant {
     /** Escucha la siguiente frase; si lo que oye es solo el final de lo que acaba de decir Ultra, no lo toma como pregunta. */
     private fun followUp(ear: Ear, said: Set<String>, onEnd: () -> Unit) {
         if (listening || thinking || speaking) return onEnd()
+        Diag.log("oído", "sigue escuchando por si dices algo más")
         ear.listen(
             onHeard = { text ->
                 // Solo si son varias palabras y todas suyas: un "sí, hazlo" o "vale" siempre pasa.
@@ -553,6 +554,7 @@ object Assistant {
                 status = ""
                 // Solo lo que dijo Maurizio, sin el trozo de la voz de Ultra que se coló delante.
                 val text = Eco.stripEcho(raw, saidBeforeCut)
+                Diag.log("oído", "al interrumpirla oyó \"$raw\" → se queda con \"$text\"")
                 saidBeforeCut = emptySet()
                 if (text.isBlank()) {
                     bargeIn = null
@@ -585,6 +587,7 @@ object Assistant {
 
     /** Añade la respuesta al chat (con una [image] opcional) y la dice en voz alta, salvo en modo texto. [onDone] se llama al terminar. */
     fun say(text: String, onDone: (() -> Unit)? = null, image: String? = null) {
+        Diag.log("decide", "contesta sin el modelo: \"$text\"")
         turns.add(Turn("assistant", text, image = image))
         status = ""
         if (!memory.voiceReplies || !voiceReady()) {
@@ -637,6 +640,7 @@ object Assistant {
     private fun speakPart(text: String) {
         val spoken = Habla.limpiar(text)
         if (spoken.isEmpty() || !voiceReady()) return
+        Diag.log("voz", "a la cola (${if (neuralVoiceOn()) "voz rápida" else "voz de Android"}): \"$spoken\"")
         queued++
         speaking = true
         synchronized(spokenWords) { rememberSpoken(spoken) }
@@ -652,6 +656,7 @@ object Assistant {
 
     private fun utteranceDone(id: String?) {
         if (id?.startsWith("g${generation}_") != true) return
+        Diag.log("voz", "terminó de sonar una frase")
         if (queued > 0) queued--
         maybeFinishSpeech()
     }
@@ -679,6 +684,7 @@ object Assistant {
         val job = answerJob ?: return
         answerJob = null
         if (!job.isActive) return
+        Diag.log("parar", "corta la respuesta que el modelo estaba escribiendo")
         job.cancel()
         thinking = false
         status = ""
@@ -686,6 +692,7 @@ object Assistant {
 
     /** Corta lo que está diciendo (por ejemplo, para empezar otra respuesta) sin terminar la conversación. */
     private fun cutSpeech(fromBargeIn: Boolean = false) {
+        if (speaking || queued > 0) Diag.log("parar", if (fromBargeIn) "se calla porque la interrumpes" else "corta la voz")
         val cut = afterSpeech != null
         generation++
         queued = 0
@@ -755,6 +762,7 @@ object Assistant {
     }
 
     private fun sendNow(typed: String, attached: Attachment?, onDone: (() -> Unit)?) {
+        Diag.log("decide", "Maurizio: \"$typed\"" + (attached?.let { " + adjunto ${it.name}" } ?: ""))
         val text = typed.ifBlank {
             when {
                 attached?.imagePath != null -> "¿Qué ves en esta foto?"
@@ -1037,6 +1045,12 @@ object Assistant {
             append(prompt0)
         }
         val prompt = if (deep) Thinking.wrap(withMemory) else withMemory
+        Diag.log(
+            "modelo",
+            "se lo pregunta al modelo (${if (brain.onGpu) "GPU" else "procesador"}" + (if (deep) ", pensando a fondo" else "") +
+                (if (brainDirty) ", conversación nueva: relee instrucciones" else "") +
+                ", ${cardBlocks.size} fichas, ${related.size} recuerdos, ${prompt.length} letras)",
+        )
         thinking = true
         status = if (deep) "Pensando a fondo…" else "Pensando…"
         val reset = brainDirty
@@ -1073,7 +1087,10 @@ object Assistant {
         var startedAt = 0L
         var firstAt = 0L
         val onChunk: (String) -> Unit = { raw ->
-            if (firstAt == 0L) firstAt = System.currentTimeMillis()
+            if (firstAt == 0L) {
+                firstAt = System.currentTimeMillis()
+                Diag.log("modelo", "primera palabra a los ${firstAt - askedAt} ms")
+            }
             main.post {
                 if (gen != generation) return@post
                 val delta = hidden.feed(raw)
@@ -1109,6 +1126,7 @@ object Assistant {
                     }
                 }
             } catch (e: CancellationException) {
+                Diag.log("parar", "respuesta del modelo cancelada a los ${System.currentTimeMillis() - askedAt} ms")
                 // PARAR o una pregunta nueva: no es un fallo. La conversación del modelo sigue valiendo
                 // (la voz y los puntos de "pensando" ya los quitó quien la paró).
                 throw e
@@ -1150,6 +1168,8 @@ object Assistant {
                     afterNote?.let { status = it }
                     afterNote = null
                     if (failed == null && finalText.isNotBlank()) TrainingLog.add(app, text, finalText, "local")
+                    Diag.log("modelo", "respuesta terminada en ${System.currentTimeMillis() - askedAt} ms (${finalText.length} letras" +
+                        (if (brain.lastToolRounds > 0) ", ${brain.lastToolRounds} rondas de herramientas" else "") + "): \"${finalText.take(150)}\"")
                     if (firstAt > 0 && firstAt - askedAt > SLOW_MS) {
                         val s = { ms: Long -> String.format(java.util.Locale.ROOT, "%.1f s", ms / 1000.0) }
                         ErrorLog.add(

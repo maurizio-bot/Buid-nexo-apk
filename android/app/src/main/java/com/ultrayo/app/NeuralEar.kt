@@ -274,12 +274,14 @@ object NeuralEar {
                             continue
                         }
                         // Se abre: el oído recibe también lo de justo antes, para no perder el principio.
+                        Diag.log("puerta", String.format(java.util.Locale.ROOT, "se abre: micro %.3f, voz de Ultra %.3f, eco normal %.2f", EchoGate.rms(chunk), ref, gate.ratio))
                         gateOpen = true
                         openedAt = now
                         preroll.forEach { stream.acceptWaveform(it, RATE) }
                         preroll.clear()
                     } else if (now - openedAt > GATE_OPEN_MS) {
                         // Se abrió pero no era nadie hablando (un golpe, un ruido): se vuelve a cerrar.
+                        Diag.log("puerta", "se cierra: en 1,5 s solo oyó eco o ruido (\"$last\")")
                         gateOpen = false
                         gate.close()
                         synchronized(decodeLock) { rec.reset(stream) }
@@ -297,6 +299,7 @@ object NeuralEar {
                 if (!interrupted) {
                     // Mientras Ultra habla: solo cuenta si no es su propio eco.
                     if (text.isNotEmpty() && !isEcho(text)) {
+                        Diag.log("oído", "te oye encima de Ultra y la corta: \"$text\"")
                         interrupted = true
                         main.post { if (mine == session) onInterrupt() }
                     } else if (endpoint) {
@@ -320,11 +323,13 @@ object NeuralEar {
                     val now = System.currentTimeMillis()
                     if (silenceSince == 0L) silenceSince = now
                     done = now - silenceSince >= Pausas.extraWaitMs(text, longPauses)
+                    if (!done && now - silenceSince < 60) Diag.log("oído", "silencio; espera ${Pausas.extraWaitMs(text, longPauses)} ms más por si sigues (\"$text\")")
                 }
                 if (interrupted && (done || finishNow)) {
                     if (mine == session) {
                         session++
                         val heard = tidy(text)
+                        Diag.log("oído", if (heard.isBlank()) "no oyó nada" else "frase terminada${if (finishNow) " (tocaste el reactor)" else ""}: \"$heard\"")
                         main.post { if (heard.isBlank()) onNothing() else onHeard(heard) }
                     }
                     return

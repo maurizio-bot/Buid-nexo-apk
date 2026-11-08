@@ -929,6 +929,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             item { PainterCard() }
+            item { DiagCard() }
             item { ErrorLogCard() }
             if (canUndo) {
                 item {
@@ -1378,6 +1379,55 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick = { editing = null }) { Text("Cancelar") }
                 }
             }
+        }
+    }
+
+    /**
+     * Diagnóstico: todo lo que ha hecho Ultra en los últimos 10 minutos (oír, decidir, el modelo, herramientas,
+     * voz, PARAR), con la hora al milisegundo, para copiarlo y pegárselo a Claude.
+     */
+    @Composable
+    private fun DiagCard() {
+        val clipboard = LocalClipboardManager.current
+        var count by remember { mutableStateOf(Diag.size()) }
+        var open by remember { mutableStateOf(false) }
+        var shown by remember { mutableStateOf("") }
+        var copied by remember { mutableStateOf(false) }
+        LaunchedEffect(open) {
+            while (true) {
+                count = Diag.size()
+                if (open) shown = Diag.text()
+                delay(1000)
+            }
+        }
+        Card {
+            SectionTitle(
+                "Diagnóstico",
+                "Todo lo que ha hecho Ultra en los últimos 10 minutos, paso a paso y con la hora exacta. " +
+                    "Si algo va mal, cópialo justo después y pégaselo a Claude.",
+            )
+            Text("$count pasos apuntados.", color = UltraColors.Muted, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                GlowButton(if (copied) "Copiado" else "Copiar", onClick = {
+                    val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
+                    clipboard.setText(
+                        AnnotatedString(
+                            "Diagnóstico de Ultra Yo $version · ${android.os.Build.MODEL} · últimos 10 min\n" +
+                                "Voz rápida: ${if (memory.fastVoice) "sí" else "no"} · Interrumpirla hablando: ${if (memory.bargeIn) "sí" else "no"} · " +
+                                "Pausas largas: ${if (memory.longPauses) "sí" else "no"} · Modelo: ${Assistant.brainModel?.label ?: "sin cargar"}" +
+                                " en ${if (Ai.brain?.onGpu == true) "GPU" else "procesador"}\n" + Diag.text(),
+                        ),
+                    )
+                    copied = true
+                })
+                TextButton(onClick = { open = !open }) { Text(if (open) "Ocultar" else "Ver") }
+                TextButton(onClick = {
+                    Diag.clear()
+                    count = 0
+                    shown = ""
+                }) { Text("Borrar") }
+            }
+            if (open) Text(shown.takeLast(6000).ifBlank { "Aún no hay nada apuntado." }, color = UltraColors.Muted, fontSize = 11.sp)
         }
     }
 

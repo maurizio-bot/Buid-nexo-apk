@@ -35,6 +35,7 @@ object ErrorLog {
 
     /** Apunta un error. Nunca lanza nada. */
     fun add(what: String, error: Throwable? = null) {
+        Diag.log("error", what + (error?.let { " · ${it.javaClass.simpleName}: ${it.message}" } ?: ""))
         runCatching {
             val f = file() ?: return
             val entry = buildString {
@@ -57,7 +58,11 @@ object ErrorLog {
      * Se escribe en disco antes de hacerlo; si la app se cierra de golpe, al volver se sabe qué era.
      * Varias cosas pueden estar en marcha a la vez (por ejemplo el oído de la palabra "Ultra" y el modelo).
      */
+    private val startedAt = HashMap<String, Long>()
+
     fun begin(key: String, what: String) {
+        Diag.log(key, "empieza: $what")
+        synchronized(startedAt) { startedAt[key] = System.currentTimeMillis() }
         runCatching {
             synchronized(running) {
                 running[key] = DATE.format(Date()) + " · " + what
@@ -68,6 +73,8 @@ object ErrorLog {
 
     /** Lo que estaba en marcha con esa clave terminó (bien o con un error ya apuntado). */
     fun end(key: String) {
+        val start = synchronized(startedAt) { startedAt.remove(key) }
+        if (start != null) Diag.log(key, "termina (${System.currentTimeMillis() - start} ms)")
         runCatching {
             synchronized(running) {
                 if (running.remove(key) != null) saveRunning()

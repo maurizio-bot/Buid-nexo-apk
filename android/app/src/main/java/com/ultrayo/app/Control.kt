@@ -118,6 +118,7 @@ object Control {
 
     /** El botón de parar: corta lo que esté haciendo en otras apps, la voz y lo pendiente. */
     fun stop() {
+        Diag.log("parar", "PARAR pulsado o dicho")
         stopped = true
         acting = false
         if (pending != null) log("Cancelado: ${pending?.plan}")

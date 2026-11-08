@@ -319,6 +319,7 @@ class Brain(
                 // El modelo a veces escribe mal el nombre ("vermi_mente" por verMiMente): se busca la de verdad.
                 // (Si no se pudieron leer los nombres, se usa el que dio el modelo tal cual, como antes.)
                 val name = if (toolNames.isEmpty()) call.name else ToolNames.resolve(call.name, toolNames)
+                Diag.log("herramienta", "el modelo pide ${call.name}" + (if (name != null && name != call.name) " (es $name)" else "") + " ${call.arguments}")
                 if (name == null) {
                     ErrorLog.add("El modelo pidió una herramienta que no existe: ${call.name}")
                     "No existe ninguna herramienta llamada ${call.name}. Contesta sin ella o usa una de estas: " +
@@ -347,6 +348,7 @@ class Brain(
                 "Error: ${e.javaClass.simpleName} ${e.message.orEmpty()}".take(300)
             }
             ErrorLog.stepDone()
+            Diag.log("herramienta", "resultado de ${call.name}: ${result.length} letras · ${result.take(120)}")
             val short = if (result.length > MAX_TOOL_RESULT) result.take(MAX_TOOL_RESULT) + "\n[… cortado: era demasiado largo]" else result
             Content.ToolResponse(call.name, short)
         }
