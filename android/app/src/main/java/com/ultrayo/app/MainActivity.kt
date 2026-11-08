@@ -1389,22 +1389,24 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun DiagCard() {
         val clipboard = LocalClipboardManager.current
-        var count by remember { mutableStateOf(Diag.size()) }
+        var count by remember { mutableStateOf(0) }
         var open by remember { mutableStateOf(false) }
         var shown by remember { mutableStateOf("") }
         var copied by remember { mutableStateOf(false) }
         LaunchedEffect(open) {
+            // Se lee del archivo fuera del hilo de la pantalla.
             while (true) {
-                count = Diag.size()
-                if (open) shown = Diag.text()
-                delay(1000)
+                val text = withContext(Dispatchers.IO) { Diag.text() }
+                count = text.count { it == '\n' }.let { if (it > 0) it - 1 else 0 }
+                if (open) shown = text
+                delay(2000)
             }
         }
         Card {
             SectionTitle(
                 "Diagnóstico",
-                "Todo lo que ha hecho Ultra en los últimos 10 minutos, paso a paso y con la hora exacta. " +
-                    "Si algo va mal, cópialo justo después y pégaselo a Claude.",
+                "Todo lo que ha hecho Ultra en los últimos 10 minutos, paso a paso y con la hora exacta. Se guarda " +
+                    "en un archivo al momento: si la app se cierra, al abrirla sigue aquí. Cópialo y pégaselo a Claude.",
             )
             Text("$count pasos apuntados.", color = UltraColors.Muted, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

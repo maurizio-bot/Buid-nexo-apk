@@ -115,19 +115,37 @@ class EchoGateTest {
     }
 }
 
-/** Ajustes > Diagnóstico: solo los últimos 10 minutos (0.33.0). */
+/** Ajustes > Diagnóstico: los 10 minutos de actividad hasta el último paso (0.33.1). */
 class DiagTest {
 
-    @Test fun guardaSoloLosUltimosDiezMinutos() {
+    @Test fun guardaLosDiezMinutosHastaElUltimoPaso() {
         Diag.clear()
         val t0 = 1_000_000_000L
         Diag.log("oído", "frase vieja", now = t0)
         Diag.log("modelo", "algo reciente", now = t0 + Diag.WINDOW_MS - 1000)
-        val text = Diag.text(now = t0 + Diag.WINDOW_MS + 500)
+        Diag.log("voz", "lo último", now = t0 + Diag.WINDOW_MS + 500)
+        val text = Diag.text()
         assertFalse(text.contains("frase vieja"))
         assertTrue(text.contains("[modelo] algo reciente"))
-        assertEquals(1, Diag.size(now = t0 + Diag.WINDOW_MS + 500))
+        assertTrue(text.contains("[voz] lo último"))
+        assertEquals(2, Diag.size())
         Diag.clear()
         assertEquals("", Diag.text())
+    }
+
+    @Test fun enArchivoSeConservaYBorraLosViejos() {
+        val folder = java.nio.file.Files.createTempDirectory("diag").toFile()
+        Diag.init(folder)
+        Diag.clear()
+        val t0 = 100 * Diag.WINDOW_MS
+        Diag.log("a", "uno", now = t0)
+        Diag.log("a", "dos", now = t0 + Diag.WINDOW_MS)
+        Diag.log("a", "tres", now = t0 + 2 * Diag.WINDOW_MS)
+        val files = java.io.File(folder, "diagnostico").listFiles()!!.map { it.name }.sorted()
+        assertEquals(listOf("diag-101.txt", "diag-102.txt"), files)
+        assertTrue(Diag.text().contains("tres"))
+        Diag.clear()
+        Diag.detach()
+        folder.deleteRecursively()
     }
 }
