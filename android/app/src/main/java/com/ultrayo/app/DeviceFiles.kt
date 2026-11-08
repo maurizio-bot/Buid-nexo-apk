@@ -34,6 +34,7 @@ data class FoundFile(
             mime.startsWith("image/") -> "foto"
             mime.startsWith("video/") -> "vídeo"
             mime.startsWith("audio/") -> "audio"
+            ApkReader.isApk(name) -> "app apk"
             Archives.isArchive(name) -> "comprimido"
             DocReader.canRead(name, mime) -> "documento"
             else -> "archivo"
@@ -97,7 +98,7 @@ object DeviceFiles {
             (wantedKind == null || f.kind == wantedKind) && words.all { f.path.lowercase().contains(it) }
 
         val found = mutableListOf<FoundFile>()
-        if (hasMedia(context) && wantedKind != "documento" && wantedKind != "comprimido") {
+        if (hasMedia(context) && wantedKind != "documento" && wantedKind != "comprimido" && wantedKind != "app apk") {
             found += media(context, words, wantedKind, limit).filter(::matches)
         }
         // Lo que Ultra Yo ha guardado en su propia carpeta
@@ -225,6 +226,7 @@ object DeviceFiles {
         "audio", "música", "musica", "canción", "cancion", "nota de voz" -> "audio"
         "documento", "doc", "pdf", "texto" -> "documento"
         "comprimido", "zip", "rar", "7z" -> "comprimido"
+        "apk", "app", "xapk", "aplicación", "aplicacion" -> "app apk"
         else -> null
     }
 

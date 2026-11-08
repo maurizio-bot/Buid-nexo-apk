@@ -224,6 +224,46 @@ class EmuladorTest {
         assertTrue("Confundió la ficha por sentido: $guess", !guess.contains("Prueba Emulador"))
     }
 
+    /** Comprimidos (RAR5 con la librería nativa, zip con contraseña) y APK en el Android de verdad. */
+    @Test
+    fun e3_comprimidosYApkEnElTelefono() {
+        val testAssets = instrumentation.context.assets
+        fun asset(name: String) = File(context.cacheDir, "prueba-$name").also { f ->
+            testAssets.open(name).use { input -> f.outputStream().use { input.copyTo(it) } }
+        }
+        val rar5 = Archives.extract(context, android.net.Uri.fromFile(asset("rar5.rar")), "rar5.rar")
+        note("> rar5\n${rar5.second}")
+        assertTrue("RAR5 no sacó nada: ${rar5.second}", rar5.first.walkTopDown().any { it.isFile && it.length() > 0 })
+
+        val rar4 = asset("rar4-contrasena.rar")
+        val sinClave = runCatching { Archives.extract(context, android.net.Uri.fromFile(rar4), "rar4.rar") }
+        assertTrue("Sin contraseña tenía que pedirla", sinClave.exceptionOrNull()?.let { Archives.explain(it) }.orEmpty().contains("contraseña"))
+        assertTrue(Archives.extract(context, android.net.Uri.fromFile(rar4), "rar4.rar", "junrar").first.walkTopDown().any { it.isFile })
+
+        val dir = File(context.cacheDir, "zip-prueba").apply { deleteRecursively(); mkdirs() }
+        val zip = File(dir, "secreto.zip")
+        net.lingala.zip4j.ZipFile(zip, "clave".toCharArray()).use {
+            it.addFile(File(dir, "nota.txt").apply { writeText("hola") }, net.lingala.zip4j.model.ZipParameters().apply {
+                isEncryptFiles = true
+                encryptionMethod = net.lingala.zip4j.model.enums.EncryptionMethod.AES
+            })
+        }
+        assertTrue(Archives.describe(context, android.net.Uri.fromFile(zip), "secreto.zip", "clave").contains("nota.txt"))
+
+        // La propia Ultra Yo, instalada: manifiesto, firma, código… y una clase decompilada con jadx.
+        val start = SystemClock.uptimeMillis()
+        val summary = ApkReader.analyze(context, pkg)
+        note("> analizarApk ${pkg} (${SystemClock.uptimeMillis() - start} ms)\n$summary\n")
+        assertTrue(summary, summary.contains("Paquete: $pkg"))
+        assertTrue(summary, summary.contains("Pantalla de inicio: $pkg.MainActivity"))
+        val t2 = SystemClock.uptimeMillis()
+        val code = ApkReader.code(context, pkg, "Calculator")
+        note("> verCodigoApk Calculator (${SystemClock.uptimeMillis() - t2} ms)\n${code.take(1500)}\n")
+        assertTrue(code.take(500), code.contains("class Calculator"))
+        assertTrue(ApkReader.code(context, pkg, "").contains("MainActivity"))
+        assertAlive("comprimidos y APK")
+    }
+
     @Test
     fun f_ordenesQueAbrenOtrasApps() {
         openApp()

@@ -12,8 +12,8 @@ android {
         applicationId = "com.ultrayo.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 45
-        versionName = "0.33.1"
+        versionCode = 46
+        versionName = "0.34.0"
         // Pruebas automáticas en un emulador (GitHub Actions): ver android/scripts/prueba-emulador.sh
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -94,6 +94,18 @@ dependencies {
     // Descomprimir zip, 7z, tar, gz, bz2 y xz
     implementation("org.apache.commons:commons-compress:1.26.2")
     implementation("org.tukaani:xz:1.9")
+    // Zip con contraseña (también AES), RAR4 (también con contraseña) y RAR5 (libarchive nativo)
+    implementation("net.lingala.zip4j:zip4j:2.11.6")
+    implementation("com.github.junrar:junrar:8.1.2")
+    implementation("me.zhanghai.android.libarchive:library:1.1.6")
+    // Decompilar el código (dex) de una APK a Java, dentro del teléfono. Sin lo que solo sirve
+    // para escribir smali o para la línea de órdenes de jadx.
+    implementation("io.github.skylot:jadx-core:1.5.6")
+    implementation("io.github.skylot:jadx-dex-input:1.5.6") {
+        exclude(group = "com.android.tools.smali")
+        exclude(group = "com.google.guava")
+        exclude(group = "com.beust")
+    }
 
     // Pruebas rápidas en el ordenador (lógica pura: cuentas, nombres oídos, "Ultra"…)
     testImplementation("junit:junit:4.13.2")
