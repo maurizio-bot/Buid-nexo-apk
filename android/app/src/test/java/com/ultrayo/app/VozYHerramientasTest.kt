@@ -72,3 +72,45 @@ class EcoTest {
         assertEquals("", Eco.stripEcho("los correos del cliente", said))
     }
 }
+
+/** La puerta del micrófono mientras Ultra habla (0.32.0). */
+class EchoGateTest {
+
+    /** Su voz por el altavoz llega al micrófono al 40 % (con altibajos): nunca abre. */
+    @Test fun suEcoNoAbreLaPuerta() {
+        val gate = EchoGate()
+        val rnd = java.util.Random(1)
+        repeat(400) {
+            val ref = 0.05f + rnd.nextFloat() * 0.25f
+            val mic = ref * (0.3f + rnd.nextFloat() * 0.2f)
+            assertFalse(gate.feed(mic, ref))
+        }
+    }
+
+    /** Maurizio habla encima (mucho más fuerte que el eco esperado): abre en 150 ms. */
+    @Test fun unaVozDeFueraAbreLaPuerta() {
+        val gate = EchoGate()
+        repeat(40) { gate.feed(0.04f, 0.1f) }
+        assertFalse(gate.feed(0.3f, 0.1f))
+        assertFalse(gate.feed(0.3f, 0.1f))
+        assertTrue(gate.feed(0.3f, 0.1f))
+    }
+
+    /** Un golpe suelto (un trozo fuerte) no la abre. */
+    @Test fun unGolpeSueltoNoAbre() {
+        val gate = EchoGate()
+        repeat(40) { gate.feed(0.04f, 0.1f) }
+        assertFalse(gate.feed(0.5f, 0.1f))
+        assertFalse(gate.feed(0.04f, 0.1f))
+        assertFalse(gate.feed(0.5f, 0.1f))
+    }
+
+    /** Cuando Ultra calla y la sala está en silencio, hablar abre. */
+    @Test fun conEllaCalladaHablarAbre() {
+        val gate = EchoGate()
+        repeat(20) { gate.feed(0.002f, 0f) }
+        gate.feed(0.1f, 0f)
+        gate.feed(0.1f, 0f)
+        assertTrue(gate.feed(0.1f, 0f))
+    }
+}

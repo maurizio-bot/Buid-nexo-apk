@@ -40,13 +40,13 @@ object Eco {
     }
 
     /** Lo oído es eco de Ultra (no hay que callarla). */
-    fun isEcho(heard: String, said: Set<String>): Boolean {
+    fun isEcho(heard: String, said: Set<String>, needed: Int = NEEDED): Boolean {
         val all = words(heard)
         if (all.isEmpty()) return true
         // "Para", "espera", "Ultra" dichos solos o casi: es Maurizio, salvo que Ultra acabe de decir esa palabra.
         if (all.size <= 3 && all.first() in stopWords && all.first() !in said) return false
         val window = all.takeLast(WINDOW)
-        return window.count { !isEchoWord(it, said) } < NEEDED
+        return window.count { !isEchoWord(it, said) } < needed
     }
 
     /**

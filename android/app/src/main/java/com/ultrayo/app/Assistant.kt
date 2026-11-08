@@ -525,7 +525,9 @@ object Assistant {
     }
 
     /** Es eco si lo último oído son palabras que acaba de decir Ultra (ver [Eco]). */
-    private fun isEcho(heard: String): Boolean = Eco.isEcho(heard, spokenWords.toHashSet())
+    // Con la puerta del micrófono ([EchoGate]) delante, lo que llega aquí ya sonó más fuerte que su eco:
+    // bastan 2 palabras nuevas.
+    private fun isEcho(heard: String): Boolean = Eco.isEcho(heard, spokenWords.toHashSet(), needed = 2)
 
     /** Lo que había dicho Ultra cuando la interrumpieron (cutSpeech lo borra), para quitar su eco de la pregunta. */
     private var saidBeforeCut: Set<String> = emptySet()

@@ -141,6 +141,29 @@ object NeuralVoice {
         }
     }
 
+    // --- Volumen de lo que está sonando (para la puerta del micrófono, [EchoGate]) ---
+
+    private val levelTimes = LongArray(512)
+    private val levelValues = FloatArray(512)
+    private var levelIndex = 0
+
+    private fun noteLevel(rms: Float) = synchronized(levelTimes) {
+        levelTimes[levelIndex] = System.currentTimeMillis()
+        levelValues[levelIndex] = rms
+        levelIndex = (levelIndex + 1) % levelTimes.size
+    }
+
+    /**
+     * El volumen más alto de lo que se ha mandado al altavoz en el último segundo y pico. Se escribe hasta
+     * 0,8 s antes de que suene, así que esta ventana cubre lo que está sonando ahora y su eco en la sala.
+     */
+    fun recentLevel(windowMs: Long = 1500): Float = synchronized(levelTimes) {
+        val since = System.currentTimeMillis() - windowMs
+        var max = 0f
+        for (i in levelTimes.indices) if (levelTimes[i] >= since && levelValues[i] > max) max = levelValues[i]
+        max
+    }
+
     /** Corta la voz al instante. */
     fun stop() {
         synchronized(lock) {
@@ -218,6 +241,7 @@ object NeuralVoice {
                 }
             }
             if (written < 0) return
+            if (written > 0) noteLevel(EchoGate.rms(samples, offset, offset + written))
             offset += written
             if (offset < samples.size) Thread.sleep(8)
         }

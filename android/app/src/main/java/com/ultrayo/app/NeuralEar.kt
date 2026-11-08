@@ -23,6 +23,15 @@ private const val RATE = 16000
 /** Trozos de 50 ms: el texto aparece casi según hablas. */
 private const val CHUNK = RATE / 20
 
+/** Lo que se guarda de antes de abrir la puerta del micrófono (0,4 s), para no perder el principio de la frase. */
+private const val PREROLL_CHUNKS = 8
+
+/** Si la puerta se abre y en 1,5 s no sale nada que no sea eco, se vuelve a cerrar. */
+private const val GATE_OPEN_MS = 1500L
+
+/** Volumen que se supone a la voz de Android (sin voz rápida no se sabe cuánto suena). */
+private const val ASSUMED_REF = 0.1f
+
 /**
  * El oído rápido de Ultra: reconocimiento de voz en español en streaming (sherpa-onnx), dentro del
  * teléfono. Va escribiendo lo que oye mientras hablas y sabe solo cuándo has terminado (0,7 s de silencio),
@@ -234,6 +243,10 @@ object NeuralEar {
         // Cuándo empezó el silencio que el reconocedor da por final de frase (0 = sigue hablando).
         var silenceSince = 0L
         var interrupted = !whileSpeaking
+        val gate = EchoGate()
+        var gateOpen = false
+        var openedAt = 0L
+        val preroll = ArrayDeque<FloatArray>()
         active = true
         try {
             record.startRecording()
@@ -248,7 +261,35 @@ object NeuralEar {
                     return
                 }
                 for (i in 0 until n) samples[i] = pcm[i] / 32768f
-                stream.acceptWaveform(if (n == CHUNK) samples else samples.copyOf(n), RATE)
+                if (whileSpeaking && !interrupted) {
+                    // Mientras Ultra habla, el oído está "sordo": lo del micrófono no le llega hasta que la
+                    // puerta detecta una voz de fuera más fuerte que su eco ([EchoGate]).
+                    val chunk = samples.copyOf(n)
+                    val now = System.currentTimeMillis()
+                    if (!gateOpen) {
+                        val ref = if (NeuralVoice.ready) NeuralVoice.recentLevel() else ASSUMED_REF
+                        if (!gate.feed(EchoGate.rms(chunk), ref)) {
+                            preroll.addLast(chunk)
+                            if (preroll.size > PREROLL_CHUNKS) preroll.removeFirst()
+                            continue
+                        }
+                        // Se abre: el oído recibe también lo de justo antes, para no perder el principio.
+                        gateOpen = true
+                        openedAt = now
+                        preroll.forEach { stream.acceptWaveform(it, RATE) }
+                        preroll.clear()
+                    } else if (now - openedAt > GATE_OPEN_MS) {
+                        // Se abrió pero no era nadie hablando (un golpe, un ruido): se vuelve a cerrar.
+                        gateOpen = false
+                        gate.close()
+                        synchronized(decodeLock) { rec.reset(stream) }
+                        last = ""
+                        continue
+                    }
+                    stream.acceptWaveform(chunk, RATE)
+                } else {
+                    stream.acceptWaveform(if (n == CHUNK) samples else samples.copyOf(n), RATE)
+                }
                 val (text, endpoint) = synchronized(decodeLock) {
                     while (rec.isReady(stream)) rec.decode(stream)
                     rec.getResult(stream).text.trim() to rec.isEndpoint(stream)
@@ -261,6 +302,8 @@ object NeuralEar {
                     } else if (endpoint) {
                         synchronized(decodeLock) { rec.reset(stream) }
                         last = ""
+                        gateOpen = false
+                        gate.close()
                         continue
                     }
                 }
