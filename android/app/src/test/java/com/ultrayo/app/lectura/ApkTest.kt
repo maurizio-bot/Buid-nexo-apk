@@ -69,7 +69,7 @@ class ApkTest {
     }
 
     @Test fun importsResumidos() {
-        val code = "package a;\n\nimport b.C;\nimport d.E;\n\nclass X {}\n"
+        val code = "package a;\n\nimport b.C;\nimport d.E;\n\n@Metadata(d1 = {\"x\"}, k = 1)\nclass X {}\n"
         assertEquals("package a;\n// (2 imports)\n\nclass X {}\n", Decompiler.withoutImports(code))
     }
 

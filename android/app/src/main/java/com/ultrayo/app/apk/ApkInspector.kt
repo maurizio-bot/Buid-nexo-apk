@@ -666,6 +666,6 @@ object ApkInspector {
         "com.android.", "dalvik.", "org.json.", "org.xmlpull.", "org.apache.", "org.slf4j.", "_COROUTINE.", "j$.",
         "com.squareup.", "org.chromium.", "io.grpc.", "com.sun.", "org.w3c.", "org.xml.", "org.mozilla.", "org.tukaani.",
         "org.checkerframework.", "org.reactivestreams.", "javax.inject.", "io.perfmark.", "org.codehaus.", "com.ctc.",
-        "org.objectweb.", "org.conscrypt.", "org.bouncycastle.", "net.jpountz.", "com.github.luben.", "org.brotli.",
+        "org.objectweb.", "org.conscrypt.", "com.github.junrar.", "me.zhanghai.android.", "com.tom_roush.", "org.jspecify.", "org.bouncycastle.", "net.jpountz.", "com.github.luben.", "org.brotli.",
     )
 }

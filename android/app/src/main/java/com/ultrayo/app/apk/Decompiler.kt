@@ -19,9 +19,9 @@ object Decompiler {
     fun withoutImports(code: String): String {
         val lines = code.lines()
         val imports = lines.count { it.startsWith("import ") }
-        if (imports == 0) return code
-        val rest = lines.filterNot { it.startsWith("import ") }.joinToString("\n").replace(Regex("\n{3,}"), "\n\n")
-        return rest.replaceFirst("\n", "\n// ($imports imports)\n")
+        // @Metadata(...) de Kotlin es un bloque ilegible de datos internos: no explica nada.
+        val rest = lines.filterNot { it.startsWith("import ") || it.trimStart().startsWith("@Metadata(") }.joinToString("\n").replace(Regex("\n{3,}"), "\n\n")
+        return if (imports == 0) rest else rest.replaceFirst("\n", "\n// ($imports imports)\n")
     }
 
     fun classCode(dex: File, className: String): String {
