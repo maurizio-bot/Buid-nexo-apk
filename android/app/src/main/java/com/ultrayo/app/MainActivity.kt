@@ -448,6 +448,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         val name = displayName(uri)
+        if (ApkReader.isApk(name)) {
+            attachApk(uri, name)
+            return
+        }
         if (Archives.isArchive(name)) {
             attachArchive(uri, name)
             return
@@ -469,6 +473,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Una APK adjunta se analiza (sin instalarla) y la IA recibe el resumen. */
+    private fun attachApk(uri: Uri, name: String) {
+        status = "Analizando \"$name\"…"
+        lifecycleScope.launch {
+            val summary = try {
+                withContext(Dispatchers.IO) { ApkReader.analyzeAttachment(this@MainActivity, uri, name) }
+            } catch (e: Throwable) {
+                status = "No pude analizar \"$name\": ${e.message}"
+                return@launch
+            }
+            status = ""
+            attachment = Attachment(name, text = summary)
+        }
+    }
+
     /** Un comprimido adjunto se descomprime en la carpeta de Ultra Yo y la IA recibe la lista de lo que había. */
     private fun attachArchive(uri: Uri, name: String) {
         status = "Descomprimiendo \"$name\"…"
@@ -476,7 +495,7 @@ class MainActivity : ComponentActivity() {
             val summary = try {
                 withContext(Dispatchers.IO) { Archives.extract(this@MainActivity, uri, name).second }
             } catch (e: Throwable) {
-                status = "No pude descomprimir \"$name\": ${e.message}"
+                status = "No pude descomprimir \"$name\": ${Archives.explain(e)}"
                 return@launch
             }
             status = ""

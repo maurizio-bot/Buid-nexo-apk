@@ -49,6 +49,17 @@ Si no puedes hablar, escribe en la barra de abajo y pulsa la flecha de enviar. C
 
 Con el botón **+** puedes adjuntar una **foto** (te dice qué ve) o un **archivo de texto** (código, notas, .txt, .md, .json…). Solo los lee, nunca los cambia.
 
+### Comprimidos y APK
+
+- **Comprimidos:** "descomprime fotos.rar" o adjúntalo con **+**. Abre zip, 7z, rar (RAR4 y RAR5), tar, gz, bz2 y xz,
+  y lo saca en Documentos/Ultra Yo/archivos/descomprimidos. Si tiene contraseña te la pide: zip (también AES),
+  7z y RAR4 con contraseña sí; RAR5 con contraseña no (no hay ningún lector libre que lo haga dentro del teléfono).
+- **APK:** "analiza la apk de Descargas" o "¿qué permisos pide WhatsApp?" (también apps instaladas, o adjuntando
+  el .apk). Te explica paquete, versión, permisos, pantallas y servicios, firma, librerías nativas, recursos,
+  idiomas, librerías conocidas (anuncios, rastreo…) y qué hace su código. "Enséñame el código de MainActivity"
+  la decompila a Java con [jadx](https://github.com/skylot/jadx) para explicártela. Nunca instala, ejecuta ni
+  cambia la APK; el informe y el código quedan en Documentos/Ultra Yo/archivos/apk.
+
 ### Crea y edita imágenes
 
 Ultra Yo pinta dentro del teléfono con Stable Diffusion, sin internet ni coste. En el S24 Ultra usa la

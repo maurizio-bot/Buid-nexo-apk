@@ -2,40 +2,38 @@ package com.ultrayo.app
 
 import android.content.Context
 import android.net.Uri
-import org.apache.commons.compress.archivers.ArchiveInputStream
-import org.apache.commons.compress.archivers.sevenz.SevenZFile
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream
-import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
-import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
-import java.io.BufferedInputStream
+import com.ultrayo.app.comprimidos.Unpack
+import me.zhanghai.android.libarchive.Archive
+import me.zhanghai.android.libarchive.ArchiveEntry
+import me.zhanghai.android.libarchive.ArchiveException
 import java.io.File
-import java.io.InputStream
+import java.nio.ByteBuffer
 import java.util.Locale
 
 /**
  * Archivos comprimidos: ver qué llevan dentro y descomprimirlos en la carpeta de Ultra Yo
  * (Documentos/Ultra Yo/archivos/descomprimidos). El comprimido original no se toca.
- * Sabe abrir zip, 7z, tar, gz, bz2 y xz (y sus combinaciones como tar.gz).
+ * Sabe abrir zip, 7z, rar (RAR4 y RAR5), tar, gz, bz2 y xz (y combinaciones como tar.gz), también
+ * con contraseña: zip (normal y AES), 7z y RAR4. RAR5 con contraseña no hay manera libre de abrirlo.
  */
 object Archives {
 
     private const val MAX_ENTRIES = 5000
     private const val MAX_TOTAL = 2L shl 30 // 2 GB descomprimidos como mucho
     private const val MAX_LISTED = 25
+    private const val RAR5_LOCKED = "este RAR5 tiene contraseña, y dentro del teléfono no hay ningún lector libre que abra " +
+        "RAR5 cifrados (los RAR4 con contraseña sí). Si se puede, que lo pase a zip o 7z con contraseña: esos sí los abro"
 
-    private val SUFFIXES = listOf(
-        ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tbz", ".tar.xz", ".txz",
-        ".zip", ".jar", ".7z", ".tar", ".gz", ".bz2", ".xz",
-    )
+    init {
+        Unpack.rar5 = ::rar5
+    }
 
-    fun isArchive(name: String): Boolean = suffix(name) != null || name.lowercase().endsWith(".rar")
+    fun isArchive(name: String): Boolean = Unpack.suffix(name) != null
 
     /** Un vistazo a lo que hay dentro, sin descomprimir nada. */
-    fun describe(context: Context, uri: Uri, name: String): String = withLocalCopy(context, uri, name) { file ->
+    fun describe(context: Context, uri: Uri, name: String, password: String? = null): String = withLocalCopy(context, uri, name) { file ->
         val entries = mutableListOf<Pair<String, Long>>()
-        forEachEntry(file, name) { entryName, size, _ ->
+        forEachEntry(file, name, password) { entryName, size, _ ->
             entries += entryName to size
             true
         }
@@ -43,29 +41,47 @@ object Archives {
     }
 
     /** Descomprime en la carpeta de Ultra Yo. Devuelve la carpeta creada y un resumen de lo que había. */
-    fun extract(context: Context, uri: Uri, name: String): Pair<File, String> = withLocalCopy(context, uri, name) { file ->
+    fun extract(context: Context, uri: Uri, name: String, password: String? = null): Pair<File, String> = withLocalCopy(context, uri, name) { file ->
         val dest = uniqueDir(File(Vault.files(context), "descomprimidos"), baseName(name))
         val root = dest.canonicalPath + File.separator
         val entries = mutableListOf<Pair<String, Long>>()
         var total = 0L
-        forEachEntry(file, name) { entryName, _, input ->
-            val target = File(dest, entryName)
-            // Nada de rutas tipo "../../" que se salgan de la carpeta.
-            if (!target.canonicalPath.startsWith(root)) return@forEachEntry true
-            target.parentFile?.mkdirs()
-            val written = target.outputStream().use { out -> copyLimited(input, out, MAX_TOTAL - total) }
-            total += written
-            entries += entryName to written
-            if (total >= MAX_TOTAL) error("descomprimido sería más de 2 GB; he parado")
-            true
+        try {
+            forEachEntry(file, name, password) { entryName, _, write ->
+                val target = File(dest, entryName)
+                // Nada de rutas tipo "../../" que se salgan de la carpeta.
+                if (!target.canonicalPath.startsWith(root)) return@forEachEntry true
+                target.parentFile?.mkdirs()
+                val written = target.outputStream().use { out ->
+                    val limited = Unpack.Limited(out, MAX_TOTAL - total)
+                    try {
+                        write(limited)
+                    } finally {
+                        total += limited.written
+                    }
+                    limited.written
+                }
+                entries += entryName to written
+                true
+            }
+        } catch (e: Throwable) {
+            // Lo que no se pudo abrir no deja una carpeta vacía o a medias sin avisar.
+            if (entries.isEmpty()) dest.deleteRecursively()
+            throw e
         }
         dest to summary(name, entries, destination = dest)
     }
 
+    /** Un mensaje claro para la IA cuando falta la contraseña o no es la buena. */
+    fun explain(e: Throwable): String = when (e) {
+        is Unpack.NeedsPassword -> "${e.message}. Pídele la contraseña a Maurizio y vuelve a intentarlo poniéndola en contrasena."
+        is Unpack.WrongPassword -> "${e.message}. Pregúntale a Maurizio si la ha escrito bien."
+        else -> e.message ?: e.javaClass.simpleName
+    }
+
     private fun <T> withLocalCopy(context: Context, uri: Uri, name: String, work: (File) -> T): T {
-        if (name.lowercase().endsWith(".rar")) error("los .rar no los sé abrir todavía; sé abrir zip, 7z, tar, gz, bz2 y xz")
         if (uri.scheme == "file") return work(File(uri.path!!))
-        // 7z y algunos zip necesitan poder saltar dentro del archivo: se trabaja con una copia temporal.
+        // 7z, rar y los zip con contraseña necesitan poder saltar dentro del archivo: se trabaja con una copia temporal.
         val tmp = File(context.cacheDir, "comprimido-${System.currentTimeMillis()}-${name.takeLast(40).replace('/', '_')}")
         try {
             context.contentResolver.openInputStream(uri)?.use { input -> tmp.outputStream().use { input.copyTo(it) } }
@@ -76,64 +92,52 @@ object Archives {
         }
     }
 
-    /**
-     * Recorre los archivos de dentro (sin carpetas). [visit] recibe el nombre, el tamaño (o -1)
-     * y el contenido; devuelve false para parar.
-     */
-    private fun forEachEntry(file: File, name: String, visit: (String, Long, InputStream) -> Boolean) {
+    private fun forEachEntry(file: File, name: String, password: String?, visit: (String, Long, (java.io.OutputStream) -> Unit) -> Boolean) {
         var count = 0
-        fun next(entryName: String, size: Long, input: InputStream): Boolean {
+        Unpack.forEachEntry(file, name, password) { entryName, size, write ->
             if (++count > MAX_ENTRIES) error("tiene más de $MAX_ENTRIES archivos; he parado")
-            return visit(entryName.trimStart('/'), size, input)
+            visit(entryName.trimStart('/'), size, write)
         }
-        when (val s = suffix(name) ?: error("no es un comprimido que sepa abrir")) {
-            ".7z" -> @Suppress("DEPRECATION") SevenZFile(file).use { z ->
-                while (true) {
-                    val entry = z.nextEntry ?: break
-                    if (entry.isDirectory || entry.isAntiItem) continue
-                    if (!next(entry.name, entry.size, z.getInputStream(entry))) break
+    }
+
+    /** RAR5 con libarchive (librería nativa). No sabe contraseñas de RAR5: lo dice claro. */
+    private fun rar5(file: File, visit: Unpack.Visitor) {
+        val archive = Archive.readNew()
+        try {
+            Archive.readSupportFormatRar5(archive)
+            Archive.readOpenFileName(archive, file.path.toByteArray(), 64 * 1024)
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val entry = try {
+                    Archive.readNextHeader(archive)
+                } catch (e: ArchiveException) {
+                    if (e.message.orEmpty().contains("ncrypt")) throw Unpack.NeedsPassword(RAR5_LOCKED)
+                    throw java.io.IOException("no pude leer el rar: ${e.message}")
                 }
-            }
-            ".zip", ".jar" -> archive(ZipArchiveInputStream(BufferedInputStream(file.inputStream())), ::next)
-            ".tar" -> archive(TarArchiveInputStream(BufferedInputStream(file.inputStream())), ::next)
-            else -> {
-                val compressed = decompress(s, BufferedInputStream(file.inputStream()))
-                if (s.startsWith(".t")) {
-                    archive(TarArchiveInputStream(compressed), ::next)
-                } else {
-                    // Un solo archivo comprimido (por ejemplo informe.txt.gz)
-                    compressed.use { next(baseName(name), -1, it) }
+                if (entry == 0L) break
+                if (ArchiveEntry.filetype(entry) and ArchiveEntry.AE_IFMT != ArchiveEntry.AE_IFREG) continue
+                if (ArchiveEntry.isEncrypted(entry)) throw Unpack.NeedsPassword(RAR5_LOCKED)
+                val entryName = ArchiveEntry.pathnameUtf8(entry) ?: ArchiveEntry.pathname(entry)?.let { String(it) } ?: continue
+                val size = if (ArchiveEntry.sizeIsSet(entry)) ArchiveEntry.size(entry) else -1
+                val keepGoing = visit.visit(entryName, size) { out ->
+                    while (true) {
+                        val wrapped = ByteBuffer.wrap(buffer)
+                        try {
+                            Archive.readData(archive, wrapped)
+                        } catch (e: ArchiveException) {
+                            if (e.message.orEmpty().contains("ncrypt")) throw Unpack.NeedsPassword(RAR5_LOCKED)
+                            throw java.io.IOException("no pude sacar $entryName: ${e.message}")
+                        }
+                        val read = wrapped.position()
+                        if (read <= 0) break
+                        out.write(buffer, 0, read)
+                    }
                 }
+                if (!keepGoing) break
             }
+        } finally {
+            runCatching { Archive.free(archive) }
         }
-    }
-
-    private fun archive(stream: ArchiveInputStream<*>, next: (String, Long, InputStream) -> Boolean) = stream.use { a ->
-        while (true) {
-            val entry = a.nextEntry ?: break
-            if (entry.isDirectory) continue
-            if (!a.canReadEntryData(entry)) error("\"${entry.name}\" está protegido con contraseña o usa un formato que no sé abrir")
-            if (!next(entry.name, entry.size, a)) break
-        }
-    }
-
-    private fun decompress(suffix: String, input: InputStream): InputStream = when (suffix) {
-        ".tar.gz", ".tgz", ".gz" -> GzipCompressorInputStream(input, true)
-        ".tar.bz2", ".tbz2", ".tbz", ".bz2" -> BZip2CompressorInputStream(input, true)
-        else -> XZCompressorInputStream(input, true)
-    }
-
-    /** Copia sin cerrar [input] (es el comprimido entero) y sin pasar de [max] bytes. */
-    private fun copyLimited(input: InputStream, out: java.io.OutputStream, max: Long): Long {
-        val buffer = ByteArray(64 * 1024)
-        var total = 0L
-        while (total < max) {
-            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), max - total).toInt())
-            if (read <= 0) break
-            out.write(buffer, 0, read)
-            total += read
-        }
-        return total
     }
 
     private fun summary(name: String, entries: List<Pair<String, Long>>, destination: File?): String = buildString {
@@ -154,10 +158,8 @@ object Archives {
         if (entries.size > MAX_LISTED) append("… y ").append(entries.size - MAX_LISTED).append(" más.\n")
     }
 
-    private fun suffix(name: String): String? = SUFFIXES.firstOrNull { name.lowercase().endsWith(it) }
-
     private fun baseName(name: String): String {
-        val s = suffix(name) ?: return name
+        val s = Unpack.suffix(name) ?: return name
         val base = name.dropLast(s.length).ifBlank { "comprimido" }
         // "informe.gz" -> "informe"; "fotos.tgz" -> "fotos"
         return base.substringAfterLast('/')

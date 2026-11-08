@@ -45,7 +45,7 @@ class PhoneTools(context: Context) : ToolSet {
     @Tool(description = "Busca en el teléfono fotos, vídeos, audios, documentos o cualquier archivo por su nombre o carpeta. Devuelve sus rutas.")
     fun buscarArchivos(
         @ToolParam(description = "Palabras del nombre o de la carpeta, por ejemplo factura, WhatsApp o Camera; vacío para ver los últimos") texto: String,
-        @ToolParam(description = "Tipo: foto, vídeo, audio, documento, o vacío para cualquiera") tipo: String,
+        @ToolParam(description = "Tipo: foto, vídeo, audio, documento, comprimido, apk, o vacío para cualquiera") tipo: String,
     ): List<String> {
         if (locked()) return listOf(LOCKED)
         val canMedia = DeviceFiles.hasMedia(context)
@@ -75,29 +75,56 @@ class PhoneTools(context: Context) : ToolSet {
         }
     }
 
-    @Tool(description = "Mira qué hay dentro de un archivo comprimido (zip, 7z, tar, gz…) sin descomprimirlo, usando la ruta que devolvió buscarArchivos.")
+    @Tool(description = "Mira qué hay dentro de un archivo comprimido (zip, 7z, rar, tar, gz…) sin descomprimirlo, usando la ruta que devolvió buscarArchivos.")
     fun verComprimido(
         @ToolParam(description = "Ruta del comprimido, tal como la devolvió buscarArchivos") ruta: String,
+        @ToolParam(description = "Contraseña, solo si Maurizio te la ha dicho; si no, vacío") contrasena: String = "",
     ): String {
         if (locked()) return LOCKED
         val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo."
         return try {
-            Archives.describe(context, file.uri, file.name)
-        } catch (e: Exception) {
-            "No pude abrirlo: ${e.message}"
+            Archives.describe(context, file.uri, file.name, contrasena.ifBlank { null })
+        } catch (e: Throwable) {
+            "No pude abrirlo: ${Archives.explain(e)}"
         }
     }
 
-    @Tool(description = "Descomprime un archivo comprimido (zip, 7z, tar, gz…) en tu carpeta, usando la ruta que devolvió buscarArchivos. Después puedes leer lo extraído con leerArchivo.")
+    @Tool(description = "Descomprime un archivo comprimido (zip, 7z, rar, tar, gz…) en tu carpeta, usando la ruta que devolvió buscarArchivos. Si tiene contraseña, pídesela a Maurizio. Después puedes leer lo extraído con leerArchivo.")
     fun descomprimir(
         @ToolParam(description = "Ruta del comprimido, tal como la devolvió buscarArchivos") ruta: String,
+        @ToolParam(description = "Contraseña, solo si Maurizio te la ha dicho; si no, vacío") contrasena: String = "",
     ): String {
         if (locked()) return LOCKED
         val file = DeviceFiles.find(context, ruta) ?: return "No encontré ese archivo."
         return try {
-            Archives.extract(context, file.uri, file.name).second
-        } catch (e: Exception) {
-            "No pude descomprimirlo: ${e.message}"
+            Archives.extract(context, file.uri, file.name, contrasena.ifBlank { null }).second
+        } catch (e: Throwable) {
+            "No pude descomprimirlo: ${Archives.explain(e)}"
+        }
+    }
+
+    @Tool(description = "Abre una APK (archivo .apk, .xapk o una app instalada por su nombre) y explica qué es: paquete, versión, permisos, pantallas y servicios, firma, librerías nativas, recursos, idiomas y qué hace su código. Solo lectura: no la instala ni la ejecuta.")
+    fun analizarApk(
+        @ToolParam(description = "Ruta del .apk tal como la devolvió buscarArchivos, o el nombre de una app instalada (por ejemplo WhatsApp)") ruta: String,
+    ): String {
+        if (locked()) return LOCKED
+        return try {
+            ApkReader.analyze(context, ruta)
+        } catch (e: Throwable) {
+            "No pude analizarla: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    @Tool(description = "Enseña el código Java (decompilado) de una clase de una APK para explicárselo a Maurizio. Con clase vacía, lista las clases por dónde empezar.")
+    fun verCodigoApk(
+        @ToolParam(description = "Ruta del .apk, o el nombre de una app instalada, igual que en analizarApk") ruta: String,
+        @ToolParam(description = "Nombre de la clase (completo o corto, por ejemplo MainActivity), o vacío para ver la lista") clase: String = "",
+    ): String {
+        if (locked()) return LOCKED
+        return try {
+            ApkReader.code(context, ruta, clase)
+        } catch (e: Throwable) {
+            "No pude sacar el código: ${e.message ?: e.javaClass.simpleName}"
         }
     }
 

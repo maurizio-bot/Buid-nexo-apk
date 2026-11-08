@@ -210,7 +210,8 @@ class Memory(context: Context) {
                 "\n\nTu carpeta de almacenamiento es $folder: ahí está tu memoria, tu base de datos y los archivos que " +
                 "Maurizio te pide guardar. Cuando te pida guardar, apuntar o registrar algo, usa guardarDato; si es un " +
                 "archivo, guardarArchivo. Si te pide descomprimir algo, usa descomprimir (lo extrae en tu carpeta) y luego " +
-                "leerArchivo para leer y analizar lo que había dentro. Cuando te pida revisar tu memoria o buscar algo guardado, usa revisarMemoria." +
+                "leerArchivo para leer y analizar lo que había dentro; si tiene contraseña, pídesela y pásala en contrasena. " +
+                "Para entender una app (un .apk o una app instalada) usa analizarApk, y verCodigoApk para ver y explicar su código. Cuando te pida revisar tu memoria o buscar algo guardado, usa revisarMemoria." +
                 "\n\nSi Maurizio te pide que cambies tu forma de ser, tus reglas o tus habilidades, usa las " +
                 "herramientas proponer… para cambiarte o borrarte a ti mismo. Maurizio confirma cada cambio en la " +
                 "pantalla, así que dile que lo revise. No las uses si él no te lo ha pedido."
