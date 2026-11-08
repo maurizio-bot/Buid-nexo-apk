@@ -35,7 +35,7 @@ object Charla {
     ).flatMap { (tipo, lista) -> lista.map { it to tipo } }.sortedByDescending { it.first.length }
 
     /** Palabras de relleno que pueden acompañar a la charla sin cambiar nada. */
-    private val relleno = setOf("oye", "eh", "pues", "y", "tu", "que", "ultra", "yo", "hoy", "amigo", "crack", "jefe", "por", "aqui", "gracias")
+    private val relleno = setOf("oye", "eh", "pues", "y", "tu", "que", "ultra", "yo", "hoy", "amigo", "crack", "jefe", "por", "aqui", "gracias", "ahora", "mira", "bueno", "venga", "oiga", "entonces", "maurizio", "a", "ver", "dime")
 
     private fun normal(text: String): String =
         Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD)

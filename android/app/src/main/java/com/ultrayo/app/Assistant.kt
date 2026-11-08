@@ -33,6 +33,9 @@ private const val SLOW_MS = 6000L
 
 /** Velocidad de la voz rápida. Con 1,08 iba algo atropellada y a veces no se entendía: ahora a ritmo normal. */
 private const val VOICE_SPEED = 1.0f
+
+/** Pausa entre que Ultra termina de hablar y vuelve a escuchar (para no oír su propio final). */
+private const val FOLLOW_UP_DELAY_MS = 400L
 private const val RESET_TURN_CHARS = 600
 
 private fun forReset(history: List<Turn>): List<Turn> =
@@ -469,8 +472,34 @@ object Assistant {
         send(text) {
             bargeIn = null
             // Sigue escuchando unos segundos sin tener que decir "Ultra" otra vez (salvo que se despida).
-            if (memory.voiceReplies && memory.followUp && !bye) converse(ear, onEnd) else onEnd()
+            // Con una pausa corta: el altavoz (y más el Bluetooth) aún suena un instante tras la última
+            // palabra, y el micrófono la cogía como si fuera la respuesta de Maurizio.
+            if (memory.voiceReplies && memory.followUp && !bye) {
+                val said = synchronized(spokenWords) { spokenWords.toHashSet() }
+                main.postDelayed({ followUp(ear, said, onEnd) }, FOLLOW_UP_DELAY_MS)
+            } else {
+                onEnd()
+            }
         }
+    }
+
+    /** Escucha la siguiente frase; si lo que oye es solo el final de lo que acaba de decir Ultra, no lo toma como pregunta. */
+    private fun followUp(ear: Ear, said: Set<String>, onEnd: () -> Unit) {
+        if (listening || thinking || speaking) return onEnd()
+        ear.listen(
+            onHeard = { text ->
+                // Solo si son varias palabras y todas suyas: un "sí, hazlo" o "vale" siempre pasa.
+                val heard = Eco.words(text).filter { it.length >= 3 }
+                if (heard.size >= 3 && heard.all { Eco.isEchoWord(it, said) }) {
+                    ErrorLog.add("Oí mi propio eco y no lo tomé como pregunta: \"${text.take(80)}\"")
+                    onEnd()
+                } else {
+                    reply(text, ear, onEnd)
+                }
+            },
+            onNothing = onEnd,
+            onFailed = { onEnd() },
+        )
     }
 
     // --- Interrumpir hablando ---
@@ -492,18 +521,14 @@ object Assistant {
 
     private fun rememberSpoken(text: String) {
         spokenWords.addAll(words(text))
-        while (spokenWords.size > 120) spokenWords.removeFirst()
+        while (spokenWords.size > 250) spokenWords.removeFirst()
     }
 
-    /** Es eco si casi todo lo oído son palabras que acaba de decir Ultra. */
-    private fun isEcho(heard: String): Boolean {
-        val said = spokenWords.toHashSet()
-        val heardWords = words(heard)
-        if (heardWords.isEmpty()) return true
-        val fresh = heardWords.count { it !in said && it.length >= 3 }
-        if (stopWords.containsMatchIn(heard.trim()) && heardWords.size <= 3 && heardWords.first() !in said) return false
-        return fresh < 2
-    }
+    /** Es eco si lo último oído son palabras que acaba de decir Ultra (ver [Eco]). */
+    private fun isEcho(heard: String): Boolean = Eco.isEcho(heard, spokenWords.toHashSet())
+
+    /** Lo que había dicho Ultra cuando la interrumpieron (cutSpeech lo borra), para quitar su eco de la pregunta. */
+    private var saidBeforeCut: Set<String> = emptySet()
 
     private fun startWatching() {
         val handler = bargeIn ?: return
@@ -514,16 +539,23 @@ object Assistant {
             onInterrupt = {
                 if (!watching) return@watch
                 // Maurizio habla: Ultra se calla al instante y le escucha.
+                saidBeforeCut = synchronized(spokenWords) { spokenWords.toHashSet() }
                 cutSpeech(fromBargeIn = true)
                 listening = true
                 status = "Te escucho…"
             },
             onPartial = { status = "🎙 $it" },
-            onHeard = { text ->
+            onHeard = { raw ->
                 watching = false
                 listening = false
                 status = ""
-                if (stopWords.containsMatchIn(text.trim()) && words(text).size <= 3) {
+                // Solo lo que dijo Maurizio, sin el trozo de la voz de Ultra que se coló delante.
+                val text = Eco.stripEcho(raw, saidBeforeCut)
+                saidBeforeCut = emptySet()
+                if (text.isBlank()) {
+                    bargeIn = null
+                    onCut?.invoke()
+                } else if (stopWords.containsMatchIn(text.trim()) && words(text).size <= 3) {
                     bargeIn = null
                     onCut?.invoke()
                 } else {

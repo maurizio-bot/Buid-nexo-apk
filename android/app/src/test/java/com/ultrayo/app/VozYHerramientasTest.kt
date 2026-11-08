@@ -46,3 +46,29 @@ class VozYHerramientasTest {
         assertEquals("Entrada o salida", Habla.limpiar("entrada/salida").replaceFirstChar { it.uppercase() })
     }
 }
+
+/** El eco de la propia voz de Ultra no debe tomarse como Maurizio (0.31.1). */
+class EcoTest {
+
+    private val said = Eco.words(
+        "Claro, te cuento lo que tengo apuntado de tus proyectos. Ahora mismo estás contestando los correos " +
+            "del cliente y preparando la presentación para el viernes.",
+    ).toSet()
+
+    @Test fun suPropiaVozMalOidaEsEco() {
+        assertTrue(Eco.isEcho("con testando los correos del cliente y prepara", said))
+        assertTrue(Eco.isEcho("te cuento lo que tengo apuntao de tus proyecto", said))
+        assertTrue(Eco.isEcho("para el viernes", said))
+    }
+
+    @Test fun maurizioHablandoNoEsEco() {
+        assertFalse(Eco.isEcho("espera quiero otra cosa distinta", said))
+        assertFalse(Eco.isEcho("del cliente y preparando oye cambia de tema ahora", said))
+        assertFalse(Eco.isEcho("calla", said))
+    }
+
+    @Test fun quitaElEcoDeDelante() {
+        assertEquals("Oye cambia de tema", Eco.stripEcho("contestando los correos oye cambia de tema", said))
+        assertEquals("", Eco.stripEcho("los correos del cliente", said))
+    }
+}
